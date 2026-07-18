@@ -1,0 +1,30 @@
+{
+  "name": "figma-mcp-console",
+  "version": "0.1.3",
+  "scripts": {
+    "prepublishOnly": "cp ../README.md ./README.md"
+  },
+  "description": "Figma MCP server for AI coding assistants — real-time read/write via a Figma Desktop plugin. No API token, no rate limits.",
+  "bin": {
+    "figma-mcp-console": "bin.js"
+  },
+  "files": [
+    "bin.js"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "figma",
+    "mcp",
+    "model-context-protocol",
+    "claude",
+    "cursor",
+    "design"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hoangann2000/figma-mcp-console.git"
+  },
+  "license": "MIT"
+}

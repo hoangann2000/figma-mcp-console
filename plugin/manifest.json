@@ -1,0 +1,14 @@
+{
+  "name": "Figma MCP Console",
+  "id": "figma-mcp-console-dev",
+  "api": "1.0.0",
+  "main": "code.js",
+  "ui": "ui.html",
+  "editorType": ["figma"],
+  "documentAccess": "dynamic-page",
+  "networkAccess": {
+    "allowedDomains": ["none"],
+    "devAllowedDomains": ["ws://localhost:2000"],
+    "reasoning": "Connects to a local MCP bridge server so AI assistants can read and edit this file."
+  }
+}

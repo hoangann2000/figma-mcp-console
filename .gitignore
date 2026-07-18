@@ -1,0 +1,5 @@
+bin/
+.mcp.json
+.claude/
+dist/
+plugin.zip

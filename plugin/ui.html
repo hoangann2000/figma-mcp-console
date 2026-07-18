@@ -1,0 +1,47 @@
+<style>
+  body {
+    font: 12px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    margin: 0; padding: 16px; color: #333;
+  }
+  #dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+         background: #d33; margin-right: 6px; vertical-align: baseline; }
+  #dot.on { background: #2a2; }
+  #hint { color: #888; margin-top: 8px; }
+</style>
+
+<div><span id="dot"></span><span id="status">Connecting…</span></div>
+<div id="hint">Keep this window open while using MCP tools.</div>
+
+<script>
+  const PORT = 2000;
+  let ws = null;
+
+  function setStatus(connected, text) {
+    document.getElementById("dot").className = connected ? "on" : "";
+    document.getElementById("status").textContent = text;
+  }
+
+  function connect() {
+    ws = new WebSocket("ws://localhost:" + PORT + "/ws");
+    ws.onopen = () => setStatus(true, "Connected to MCP server");
+    ws.onmessage = (e) => {
+      // Relay server request to the plugin main thread.
+      parent.postMessage({ pluginMessage: JSON.parse(e.data) }, "*");
+    };
+    ws.onclose = () => {
+      setStatus(false, "Waiting for MCP server on port " + PORT + "…");
+      setTimeout(connect, 2000);
+    };
+    ws.onerror = () => ws.close();
+  }
+
+  // Relay plugin main-thread responses back to the server.
+  window.onmessage = (e) => {
+    const msg = e.data.pluginMessage;
+    if (msg && ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(msg));
+    }
+  };
+
+  connect();
+</script>

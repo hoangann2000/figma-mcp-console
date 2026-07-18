@@ -1,0 +1,32 @@
+version: 2
+project_name: figma-mcp
+
+builds:
+  - main: ./cmd/figma-mcp
+    binary: figma-mcp
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+    ignore:
+      - goos: windows
+        goarch: arm64
+
+# Publish raw binaries (not tar/zip archives) so the npm wrapper can download
+# them directly by predictable name, e.g. figma-mcp_darwin_arm64.
+archives:
+  - formats: [binary]
+    name_template: "figma-mcp_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  disable: true
+
+release:
+  header: |
+    ### 👉 [Download plugin.zip](https://github.com/hoangann2000/figma-mcp-console/releases/download/{{ .Tag }}/plugin.zip) — the only file you need
+  extra_files:
+    # Built by the release workflow before goreleaser runs.
+    - glob: ./plugin.zip
+
+changelog:
+  disable: true
