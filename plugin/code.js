@@ -2,7 +2,7 @@
 // Receives {id, command, params} from the Go bridge (relayed through ui.html),
 // executes it against the Figma Plugin API, and replies {id, result|error}.
 
-figma.showUI(__html__, { width: 300, height: 90 });
+figma.showUI(__html__, { width: 300, height: 128 });
 
 // ---------- helpers ----------
 
@@ -360,28 +360,34 @@ const handlers = {
 
   async download_assets(params) {
     const out = [];
+    // One bad item (stale node id, un-exportable type) must not sink the
+    // whole batch — report it in place and keep exporting the rest.
     for (const item of params.items) {
-      const target = await node(item.node_id);
-      if (!("exportAsync" in target)) throw new Error("node " + item.node_id + " cannot be exported");
-      const format = (item.format || "PNG").toUpperCase();
-      let settings;
-      if (format === "SVG") {
-        settings = { format: "SVG" };
-      } else if (format === "PNG" || format === "JPG") {
-        let scale = item.scale || 1;
-        scale = Math.max(0.5, Math.min(scale, 4));
-        settings = { format, constraint: { type: "SCALE", value: scale } };
-      } else {
-        throw new Error("unsupported format: " + format + " (use PNG, JPG or SVG)");
+      try {
+        const target = await node(item.node_id);
+        if (!("exportAsync" in target)) throw new Error("node " + item.node_id + " cannot be exported");
+        const format = (item.format || "PNG").toUpperCase();
+        let settings;
+        if (format === "SVG") {
+          settings = { format: "SVG" };
+        } else if (format === "PNG" || format === "JPG") {
+          let scale = item.scale || 1;
+          scale = Math.max(0.5, Math.min(scale, 4));
+          settings = { format, constraint: { type: "SCALE", value: scale } };
+        } else {
+          throw new Error("unsupported format: " + format + " (use PNG, JPG or SVG)");
+        }
+        const bytes = await target.exportAsync(settings);
+        out.push({
+          data: figma.base64Encode(bytes),
+          format,
+          name: target.name,
+          width: "width" in target ? target.width : 0,
+          height: "height" in target ? target.height : 0,
+        });
+      } catch (e) {
+        out.push({ error: String((e && e.message) || e) });
       }
-      const bytes = await target.exportAsync(settings);
-      out.push({
-        data: figma.base64Encode(bytes),
-        format,
-        name: target.name,
-        width: "width" in target ? target.width : 0,
-        height: "height" in target ? target.height : 0,
-      });
     }
     return out;
   },

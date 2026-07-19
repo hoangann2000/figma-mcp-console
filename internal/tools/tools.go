@@ -21,6 +21,17 @@ import (
 
 const screenshotTimeout = 60 * time.Second
 
+// downloadTimeout grows with batch size: exports run per node in the
+// plugin, so a flat cap would starve large batches. Never below the
+// screenshot timeout, capped at 5 minutes.
+func downloadTimeout(items int) time.Duration {
+	d := screenshotTimeout + time.Duration(items)*5*time.Second
+	if d > 5*time.Minute {
+		return 5 * time.Minute
+	}
+	return d
+}
+
 // registerBridged wires an MCP tool named name straight to the plugin
 // command of the same name: typed args in, raw JSON result out as text.
 func registerBridged[In any](s *mcp.Server, b *bridge.Bridge, name, desc string, timeout time.Duration) {
@@ -226,7 +237,7 @@ type effectsArgs struct {
 type downloadItem struct {
 	NodeID string  `json:"node_id" jsonschema:"node to export"`
 	Path   string  `json:"path" jsonschema:"file path to write, relative to the project directory, e.g. src/assets/icons/arrow.svg"`
-	Format string  `json:"format,omitempty" jsonschema:"SVG, PNG, or JPG (default: from the path extension, else PNG)"`
+	Format string  `json:"format,omitempty" jsonschema:"SVG, PNG, or JPG (default: from the path extension, else PNG). SVG only suits pure vector nodes; use PNG when the node has IMAGE fills or blur/shadow effects"`
 	Scale  float64 `json:"scale,omitempty" jsonschema:"export scale 0.5..4 for PNG/JPG (default 1)"`
 }
 
@@ -240,6 +251,7 @@ type exportResult struct {
 	Name   string  `json:"name"`
 	Width  float64 `json:"width"`
 	Height float64 `json:"height"`
+	Error  string  `json:"error,omitempty"`
 }
 
 type setSelectionArgs struct {
@@ -516,7 +528,11 @@ func Register(s *mcp.Server, b *bridge.Bridge) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "download_assets",
 		Description: "Export one or more nodes as SVG, PNG or JPG images and save each to a file inside the " +
-			"project directory. Use this to bring icons and images from Figma into the codebase.",
+			"project directory. Use this to bring icons and images from Figma into the codebase. " +
+			"Pick the format per node based on its content (check type and fills via get_design_context first): " +
+			"SVG for pure vector content — icons, logos, shape/path illustrations — it stays sharp and editable; " +
+			"PNG at scale 2 for anything containing raster IMAGE fills, photos, screenshots, or blur/shadow effects, " +
+			"which SVG cannot represent; JPG only for large photos where file size matters.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args downloadArgs) (*mcp.CallToolResult, any, error) {
 		if len(args.Items) == 0 {
 			return nil, nil, fmt.Errorf("items is required")
@@ -547,7 +563,7 @@ func Register(s *mcp.Server, b *bridge.Bridge) {
 				"scale":   item.Scale,
 			}
 		}
-		raw, err := b.CallTimeout(ctx, "download_assets", map[string]any{"items": pluginItems}, screenshotTimeout)
+		raw, err := b.CallTimeout(ctx, "download_assets", map[string]any{"items": pluginItems}, downloadTimeout(len(args.Items)))
 		if err != nil {
 			return nil, nil, err
 		}
@@ -559,7 +575,13 @@ func Register(s *mcp.Server, b *bridge.Bridge) {
 			return nil, nil, fmt.Errorf("plugin returned %d assets for %d items", len(results), len(args.Items))
 		}
 		var lines []string
+		failed := 0
 		for i, res := range results {
+			if res.Error != "" {
+				failed++
+				lines = append(lines, fmt.Sprintf("FAILED %s (node %s): %s", args.Items[i].Path, args.Items[i].NodeID, res.Error))
+				continue
+			}
 			data, err := base64.StdEncoding.DecodeString(res.Data)
 			if err != nil {
 				return nil, nil, fmt.Errorf("decode asset %d base64: %w", i, err)
@@ -572,6 +594,9 @@ func Register(s *mcp.Server, b *bridge.Bridge) {
 			}
 			lines = append(lines, fmt.Sprintf("Exported %q (%.0fx%.0f px) as %s to %s (%d bytes)",
 				res.Name, res.Width, res.Height, res.Format, dests[i], len(data)))
+		}
+		if failed == len(args.Items) {
+			return nil, nil, fmt.Errorf("all %d exports failed:\n%s", failed, strings.Join(lines, "\n"))
 		}
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: strings.Join(lines, "\n")}},

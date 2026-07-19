@@ -27,7 +27,7 @@ Follow this workflow, using the figma-console MCP tools:
 4. Style: set_fills for fill colors, set_corner_radius for rounded corners, set_strokes for borders, set_effects for shadows and blurs.
 5. Verify visually: call get_screenshot on the root frame after each meaningful chunk of work and compare against the brief.
 6. Iterate: fix issues with move_nodes, resize_nodes, set_characters, set_fills, remove_nodes until the screenshot matches the intent.
-7. Finish by calling set_selection on the root frame so the user can see the result. If the user wants assets in their codebase, export icons/images with download_assets (SVG for icons).`, brief)
+7. Finish by calling set_selection on the root frame so the user can see the result. If the user wants assets in their codebase, export icons/images with download_assets — SVG for pure vector nodes (icons, logos), PNG at scale 2 for nodes with raster IMAGE fills or blur/shadow effects.`, brief)
 		return &mcp.GetPromptResult{
 			Description: "Figma design workflow",
 			Messages: []*mcp.PromptMessage{
