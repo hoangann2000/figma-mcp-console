@@ -236,7 +236,7 @@ type effectsArgs struct {
 
 type downloadItem struct {
 	NodeID string  `json:"node_id" jsonschema:"node to export"`
-	Path   string  `json:"path" jsonschema:"file path to write, relative to the project directory, e.g. src/assets/icons/arrow.svg"`
+	Path   string  `json:"path,omitempty" jsonschema:"destination file path relative to the project directory. Omit it to use the defaults: assets/icons/<layer-name>.svg for SVG, assets/images/<layer-name>.<ext> for PNG/JPG. Set it only when the user or the project's asset conventions specify a destination, e.g. public/icons/arrow-right.svg"`
 	Format string  `json:"format,omitempty" jsonschema:"SVG, PNG, or JPG (default: from the path extension, else PNG). SVG only suits pure vector nodes; use PNG when the node has IMAGE fills or blur/shadow effects"`
 	Scale  float64 `json:"scale,omitempty" jsonschema:"export scale 0.5..4 for PNG/JPG (default 1)"`
 }
@@ -529,6 +529,9 @@ func Register(s *mcp.Server, b *bridge.Bridge) {
 		Name: "download_assets",
 		Description: "Export one or more nodes as SVG, PNG or JPG images and save each to a file inside the " +
 			"project directory. Use this to bring icons and images from Figma into the codebase. " +
+			"When neither the user nor the project's conventions dictate where assets go, omit path and files " +
+			"land in assets/icons/<layer-name>.svg for SVG or assets/images/<layer-name>.<ext> for PNG/JPG; " +
+			"an explicit path always wins. " +
 			"Pick the format per node based on its content (check type and fills via get_design_context first): " +
 			"SVG for pure vector content — icons, logos, shape/path illustrations — it stays sharp and editable; " +
 			"PNG at scale 2 for anything containing raster IMAGE fills, photos, screenshots, or blur/shadow effects, " +
@@ -537,15 +540,19 @@ func Register(s *mcp.Server, b *bridge.Bridge) {
 		if len(args.Items) == 0 {
 			return nil, nil, fmt.Errorf("items is required")
 		}
-		// Validate every destination before exporting anything.
+		// Validate every explicit destination before exporting anything.
+		// Items without a path get a default one after the export, derived
+		// from the layer name the plugin reports.
 		dests := make([]string, len(args.Items))
 		pluginItems := make([]map[string]any, len(args.Items))
 		for i, item := range args.Items {
-			dest, err := resolveProjectPath(item.Path)
-			if err != nil {
-				return nil, nil, err
+			if item.Path != "" {
+				dest, err := resolveProjectPath(item.Path)
+				if err != nil {
+					return nil, nil, err
+				}
+				dests[i] = dest
 			}
-			dests[i] = dest
 			format := strings.ToUpper(item.Format)
 			if format == "" {
 				switch strings.ToLower(filepath.Ext(item.Path)) {
@@ -576,11 +583,34 @@ func Register(s *mcp.Server, b *bridge.Bridge) {
 		}
 		var lines []string
 		failed := 0
+		defaultNames := map[string]int{}
 		for i, res := range results {
 			if res.Error != "" {
 				failed++
 				lines = append(lines, fmt.Sprintf("FAILED %s (node %s): %s", args.Items[i].Path, args.Items[i].NodeID, res.Error))
 				continue
+			}
+			if dests[i] == "" {
+				base := assetFileName(res.Name)
+				if base == "" {
+					base = "asset"
+				}
+				ext := "." + strings.ToLower(res.Format)
+				if n := defaultNames[base+ext]; n > 0 {
+					defaultNames[base+ext] = n + 1
+					base = fmt.Sprintf("%s-%d", base, n+1)
+				} else {
+					defaultNames[base+ext] = 1
+				}
+				dir := "assets/images/"
+				if res.Format == "SVG" {
+					dir = "assets/icons/"
+				}
+				dest, err := resolveProjectPath(dir + base + ext)
+				if err != nil {
+					return nil, nil, err
+				}
+				dests[i] = dest
 			}
 			data, err := base64.StdEncoding.DecodeString(res.Data)
 			if err != nil {
@@ -648,6 +678,27 @@ func loadImageBytes(ctx context.Context, source string) ([]byte, error) {
 
 // resolveProjectPath resolves p against the current working directory (the
 // project the MCP client launched us in) and rejects paths that escape it.
+// assetFileName turns a Figma layer name like "icon/Arrow Right" into
+// "arrow-right" for the default export path. The part before the last
+// slash is a naming-convention prefix, not part of the asset's name.
+func assetFileName(name string) string {
+	if i := strings.LastIndex(name, "/"); i >= 0 {
+		name = name[i+1:]
+	}
+	var b strings.Builder
+	prevDash := true
+	for _, r := range strings.ToLower(name) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			prevDash = false
+		} else if !prevDash {
+			b.WriteByte('-')
+			prevDash = true
+		}
+	}
+	return strings.TrimRight(b.String(), "-")
+}
+
 func resolveProjectPath(p string) (string, error) {
 	if p == "" {
 		return "", fmt.Errorf("path is required")
