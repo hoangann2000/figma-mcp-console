@@ -60,6 +60,23 @@ type pluginFrame struct {
 	Register *FileInfo       `json:"register"`
 }
 
+// ProtocolVersion is the plugin↔server wire-protocol version. The plugin
+// (ui.html) carries a matching constant and warns in its status line when the
+// two differ, so a stale plugin imported into Figma running against a newer
+// server is diagnosed up front instead of failing later with a cryptic
+// "unknown command". Bump it on any breaking change to the command set or
+// message shape the plugin must understand.
+const ProtocolVersion = 1
+
+// Keepalive tuning for plugin connections. A dead Figma window (asleep,
+// crashed tab, sleeping machine) may never send a TCP FIN, so the owner
+// pings each plugin and drops it the moment a ping goes unanswered rather
+// than letting every call to it stall until the per-call timeout.
+const (
+	pingInterval = 15 * time.Second
+	pingTimeout  = 10 * time.Second
+)
+
 // maxMessageSize accommodates large base64 screenshot payloads; the
 // coder/websocket default of 32 KiB would kill the connection.
 const maxMessageSize = 50 << 20
@@ -207,11 +224,45 @@ func (b *Bridge) handlePlugin(w http.ResponseWriter, r *http.Request) {
 
 	// The hello frame is the adoption handshake and feeds the plugin UI
 	// status line; the plugin answers with a register frame naming its file.
+	// protocol lets the plugin flag itself as outdated against a newer server.
 	_ = pc.write(context.Background(), map[string]any{
-		"hello": map[string]any{"project": b.project, "port": b.port},
+		"hello": map[string]any{"project": b.project, "port": b.port, "protocol": ProtocolVersion},
 	})
 
+	// Keepalive runs alongside the read loop and stops when it returns (the
+	// conn is gone). A failed ping closes the socket, which unblocks the read
+	// loop so dropPlugin runs exactly once from there.
+	pingCtx, stopPing := context.WithCancel(context.Background())
+	defer stopPing()
+	go b.pingLoop(pingCtx, pc)
+
 	b.readPlugin(pc)
+}
+
+// pingLoop pings one plugin until ctx is cancelled (the read loop returned)
+// or a ping goes unanswered. An unanswered ping means the window is gone:
+// closing the socket unblocks readPlugin, which cleans up via dropPlugin.
+func (b *Bridge) pingLoop(ctx context.Context, pc *pluginConn) {
+	t := time.NewTicker(pingInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			pctx, cancel := context.WithTimeout(ctx, pingTimeout)
+			err := pc.c.Ping(pctx)
+			cancel()
+			if err != nil {
+				if ctx.Err() != nil {
+					return // conn already being torn down elsewhere
+				}
+				log.Printf("bridge: figma plugin %q failed keepalive ping, dropping: %v", pc.label(), err)
+				pc.c.CloseNow()
+				return
+			}
+		}
+	}
 }
 
 // readPlugin routes one plugin's frames until the connection dies.

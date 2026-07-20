@@ -97,10 +97,12 @@
   // background tabs throttle timers, so a visibility change and a click on
   // the status line also trigger an immediate attempt.
   const PORT = 2000,
-    RETRY = 1000;
+    RETRY = 1000,
+    PROTOCOL = 1; // must match bridge.ProtocolVersion in the Go server
   let ws = null; // open connection, null while disconnected
   let attempt = null; // socket currently trying to connect
   let reg = null; // {key, name} of this file, sent by the main thread
+  let protoWarning = null; // set when the server reports a newer protocol
 
   function setStatus(connected, text) {
     document.getElementById("dot").className = connected ? "on" : "";
@@ -108,6 +110,7 @@
   }
 
   function label() {
+    if (protoWarning) return protoWarning;
     return reg ? "Connected · " + reg.name : "Connected (port " + PORT + ")";
   }
 
@@ -136,6 +139,10 @@
     sock.onmessage = (e) => {
       const msg = JSON.parse(e.data);
       if (msg.hello) {
+        protoWarning =
+          msg.hello.protocol && msg.hello.protocol !== PROTOCOL
+            ? "⚠ Plugin outdated — re-import from the latest release"
+            : null;
         setStatus(true, label());
         return;
       }
