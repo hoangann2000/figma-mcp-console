@@ -1,6 +1,6 @@
 # Figma MCP Console
 
-[![npm](https://img.shields.io/npm/v/@hoangann/figma-mcp-console?color=cb3837&logo=npm)](https://www.npmjs.com/package/@hoangann/figma-mcp-console)
+[![npm](https://img.shields.io/npm/v/figma-mcp-console?color=cb3837&logo=npm)](https://www.npmjs.com/package/figma-mcp-console)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-blue)](https://modelcontextprotocol.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/hoangann2000/figma-mcp-console/blob/main/LICENSE)
 
@@ -35,7 +35,7 @@ No install needed — `npx` downloads and runs everything automatically.
 Run inside the project you work in:
 
 ```sh
-claude mcp add figma-console -- npx -y @hoangann/figma-mcp-console@latest
+claude mcp add figma-console -- npx -y figma-mcp-console@latest
 ```
 
 Or add to the project's `.mcp.json`:
@@ -45,7 +45,7 @@ Or add to the project's `.mcp.json`:
   "mcpServers": {
     "figma-console": {
       "command": "npx",
-      "args": ["-y", "@hoangann/figma-mcp-console@latest"]
+      "args": ["-y", "figma-mcp-console@latest"]
     }
   }
 }
@@ -63,13 +63,13 @@ Or add to the project's `.mcp.json`:
   "mcpServers": {
     "figma-console": {
       "command": "npx",
-      "args": ["-y", "@hoangann/figma-mcp-console@latest"]
+      "args": ["-y", "figma-mcp-console@latest"]
     }
   }
 }
 ```
 
-Restart Claude Desktop. On Windows use `"command": "cmd"`, `"args": ["/c", "npx", "-y", "@hoangann/figma-mcp-console@latest"]`.
+Restart Claude Desktop. On Windows use `"command": "cmd"`, `"args": ["/c", "npx", "-y", "figma-mcp-console@latest"]`.
 
 </details>
 
@@ -77,7 +77,7 @@ Restart Claude Desktop. On Windows use `"command": "cmd"`, `"args": ["/c", "npx"
 <summary><b>Codex CLI</b></summary>
 
 ```sh
-codex mcp add figma-console -- npx -y @hoangann/figma-mcp-console@latest
+codex mcp add figma-console -- npx -y figma-mcp-console@latest
 ```
 
 Or in `~/.codex/config.toml`:
@@ -85,7 +85,7 @@ Or in `~/.codex/config.toml`:
 ```toml
 [mcp_servers.figma-console]
 command = "npx"
-args = ["-y", "@hoangann/figma-mcp-console@latest"]
+args = ["-y", "figma-mcp-console@latest"]
 ```
 
 </details>
@@ -101,7 +101,7 @@ Create `.vscode/mcp.json` (or **Command Palette → "MCP: Add Server"**):
     "figma-console": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "@hoangann/figma-mcp-console@latest"],
+      "args": ["-y", "figma-mcp-console@latest"],
       "cwd": "${workspaceFolder}"
     }
   }
@@ -122,7 +122,7 @@ Create `.cursor/mcp.json` (or **Settings → MCP → Add new MCP server**):
   "mcpServers": {
     "figma-console": {
       "command": "npx",
-      "args": ["-y", "@hoangann/figma-mcp-console@latest"]
+      "args": ["-y", "figma-mcp-console@latest"]
     }
   }
 }
@@ -140,7 +140,7 @@ Agent panel → **MCP Servers → Manage MCP servers → View raw config** (`mcp
   "mcpServers": {
     "figma-console": {
       "command": "npx",
-      "args": ["-y", "@hoangann/figma-mcp-console@latest"]
+      "args": ["-y", "figma-mcp-console@latest"]
     }
   }
 }
@@ -153,7 +153,7 @@ Click **Refresh** after saving.
 <details>
 <summary><b>Other MCP clients (opencode, Windsurf, Cline, Gemini CLI, Zed, …)</b></summary>
 
-Standard MCP stdio transport — any client works. Set the command to `npx` with args `["-y", "@hoangann/figma-mcp-console@latest"]`.
+Standard MCP stdio transport — any client works. Set the command to `npx` with args `["-y", "figma-mcp-console@latest"]`.
 
 </details>
 
