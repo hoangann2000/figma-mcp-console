@@ -63,7 +63,7 @@ func main() {
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "figma-console",
 		Title:   "Figma MCP Console",
-		Version: "0.3.0",
+		Version: "0.5.0",
 	}, nil)
 	tools.Register(server, r)
 	tools.RegisterPrompts(server)
