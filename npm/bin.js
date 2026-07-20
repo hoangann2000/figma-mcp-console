@@ -19,7 +19,7 @@ const REPO = "hoangann2000/figma-mcp-console"; // must match the GitHub repo
 // The GitHub release tag to download the server binary from. Decoupled from
 // pkg.version so npm-only updates (README, wrapper fixes) don't require a new
 // GitHub release. Bump this ONLY when a new vX.Y.Z release exists on GitHub.
-const BINARY_VERSION = "0.2.1";
+const BINARY_VERSION = "0.3.0";
 
 const GOOS = { darwin: "darwin", linux: "linux", win32: "windows" }[process.platform];
 const GOARCH = { x64: "amd64", arm64: "arm64" }[process.arch];

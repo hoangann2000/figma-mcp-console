@@ -58,17 +58,28 @@ func TestEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list tools: %v", err)
 	}
-	if n := len(tools.Tools); n != 43 {
-		t.Errorf("want 43 tools, got %d", n)
+	if n := len(tools.Tools); n != 44 {
+		t.Errorf("want 44 tools, got %d", n)
 	}
 
-	// Before the plugin connects: friendly error, not a timeout.
-	res, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "get_metadata"})
-	if err != nil {
-		t.Fatalf("call get_metadata: %v", err)
-	}
-	if !res.IsError || !strings.Contains(res.Content[0].(*mcp.TextContent).Text, "not connected") {
-		t.Errorf("want not-connected tool error, got %+v", res)
+	// Before the plugin connects: friendly error, not a timeout. The bridge
+	// election runs concurrently with startup, so retry past the brief
+	// "(re)connecting" window.
+	var res *mcp.CallToolResult
+	deadline0 := time.Now().Add(5 * time.Second)
+	for {
+		res, err = session.CallTool(ctx, &mcp.CallToolParams{Name: "get_metadata"})
+		if err != nil {
+			t.Fatalf("call get_metadata: %v", err)
+		}
+		if res.IsError && strings.Contains(res.Content[0].(*mcp.TextContent).Text, "no Figma plugin is connected") {
+			break
+		}
+		if time.Now().After(deadline0) {
+			t.Errorf("want not-connected tool error, got %+v", res.Content)
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	// Attach a fake plugin that answers get_metadata.

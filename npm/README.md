@@ -1,6 +1,6 @@
 # Figma MCP Console
 
-[![npm](https://img.shields.io/npm/v/@hoangann/figma-mcp-console?color=cb3837&logo=npm)](https://www.npmjs.com/package/@hoangann/figma-mcp-console)
+[![npm](https://img.shields.io/npm/v/figma-mcp-console?color=cb3837&logo=npm)](https://www.npmjs.com/package/figma-mcp-console)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-blue)](https://modelcontextprotocol.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/hoangann2000/figma-mcp-console/blob/main/LICENSE)
 
@@ -35,7 +35,7 @@ No install needed — `npx` downloads and runs everything automatically.
 Run inside the project you work in:
 
 ```sh
-claude mcp add figma-console -- npx -y @hoangann/figma-mcp-console@latest
+claude mcp add figma-console -- npx -y figma-mcp-console@latest
 ```
 
 Or add to the project's `.mcp.json`:
@@ -45,7 +45,7 @@ Or add to the project's `.mcp.json`:
   "mcpServers": {
     "figma-console": {
       "command": "npx",
-      "args": ["-y", "@hoangann/figma-mcp-console@latest"]
+      "args": ["-y", "figma-mcp-console@latest"]
     }
   }
 }
@@ -63,13 +63,13 @@ Or add to the project's `.mcp.json`:
   "mcpServers": {
     "figma-console": {
       "command": "npx",
-      "args": ["-y", "@hoangann/figma-mcp-console@latest"]
+      "args": ["-y", "figma-mcp-console@latest"]
     }
   }
 }
 ```
 
-Restart Claude Desktop. On Windows use `"command": "cmd"`, `"args": ["/c", "npx", "-y", "@hoangann/figma-mcp-console@latest"]`.
+Restart Claude Desktop. On Windows use `"command": "cmd"`, `"args": ["/c", "npx", "-y", "figma-mcp-console@latest"]`.
 
 </details>
 
@@ -77,7 +77,7 @@ Restart Claude Desktop. On Windows use `"command": "cmd"`, `"args": ["/c", "npx"
 <summary><b>Codex CLI</b></summary>
 
 ```sh
-codex mcp add figma-console -- npx -y @hoangann/figma-mcp-console@latest
+codex mcp add figma-console -- npx -y figma-mcp-console@latest
 ```
 
 Or in `~/.codex/config.toml`:
@@ -85,7 +85,7 @@ Or in `~/.codex/config.toml`:
 ```toml
 [mcp_servers.figma-console]
 command = "npx"
-args = ["-y", "@hoangann/figma-mcp-console@latest"]
+args = ["-y", "figma-mcp-console@latest"]
 ```
 
 </details>
@@ -101,7 +101,7 @@ Create `.vscode/mcp.json` (or **Command Palette → "MCP: Add Server"**):
     "figma-console": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "@hoangann/figma-mcp-console@latest"],
+      "args": ["-y", "figma-mcp-console@latest"],
       "cwd": "${workspaceFolder}"
     }
   }
@@ -122,7 +122,7 @@ Create `.cursor/mcp.json` (or **Settings → MCP → Add new MCP server**):
   "mcpServers": {
     "figma-console": {
       "command": "npx",
-      "args": ["-y", "@hoangann/figma-mcp-console@latest"]
+      "args": ["-y", "figma-mcp-console@latest"]
     }
   }
 }
@@ -140,7 +140,7 @@ Agent panel → **MCP Servers → Manage MCP servers → View raw config** (`mcp
   "mcpServers": {
     "figma-console": {
       "command": "npx",
-      "args": ["-y", "@hoangann/figma-mcp-console@latest"]
+      "args": ["-y", "figma-mcp-console@latest"]
     }
   }
 }
@@ -153,7 +153,7 @@ Click **Refresh** after saving.
 <details>
 <summary><b>Other MCP clients (opencode, Windsurf, Cline, Gemini CLI, Zed, …)</b></summary>
 
-Standard MCP stdio transport — any client works. Set the command to `npx` with args `["-y", "@hoangann/figma-mcp-console@latest"]`.
+Standard MCP stdio transport — any client works. Set the command to `npx` with args `["-y", "figma-mcp-console@latest"]`.
 
 </details>
 
@@ -167,42 +167,23 @@ Standard MCP stdio transport — any client works. Set the command to `npx` with
 
 ### Step 3 — Try it
 
-#### 🖥️ Implement a Figma design in code
-
-In Figma, right-click the page's frame → **Copy link to selection**, then paste this prompt:
-
-> **📋 Copy-paste prompt:**
+**Figma → code** — right-click a frame → **Copy link to selection**, then:
 
 ```text
-Implement this Figma page in our project: <paste link>
-
-- Recreate the layout, spacing, typography and colors exactly as designed
-- Export icons from the design as SVG into public/icons and images as PNG
-  into public/images, and use those files in the code — do not create your own
-- The design is the desktop layout (1440px); make the page responsive
-  and adapt it sensibly for tablet and mobile
-- When done, screenshot the Figma frame, compare it with the implemented
-  page, and fix any differences before finishing
+Implement this Figma page in our project: <paste link>. Match layout, spacing,
+type and colors; export its icons/images into the project; screenshot the frame
+and compare when done.
 ```
 
-The link contains the frame's node id, so the AI knows exactly which page to read. *(No link? Just select the frame in Figma and say "implement the frame I selected".)*
-
-#### 🎨 Draw a Figma design from a requirement
-
-> **📋 Copy-paste prompt:**
+**Requirement → Figma:**
 
 ```text
-Design a landing page (desktop, 1440px wide) in Figma for this requirement:
-"SaaS product page: hero with headline and CTA button, three feature cards,
-a pricing section with three plans, and a footer."
-
-- light theme, primary color #2563EB, font Inter
-- use auto-layout for every section, 80px vertical spacing between sections
-- when done, take a screenshot, compare it against this brief, and fix
-  anything that's off
+Design a SaaS landing page in Figma (desktop, 1440px): hero + CTA, three feature
+cards, pricing with three plans, footer. Light theme, use auto-layout, then
+screenshot and fix anything off.
 ```
 
-> 🎯 **The screenshot line matters in both workflows** — it makes the AI look at the actual result and iterate instead of guessing. The more concrete the brief, the closer the first pass lands.
+> 🎯 Asking the AI to **screenshot and compare** at the end makes it check its own work instead of guessing.
 
 ---
 
@@ -218,18 +199,14 @@ Exports follow the file extension the AI picks (`.svg` for vector, `.png`/`.jpg`
 | VS Code Copilot | `.github/copilot-instructions.md` |
 | Windsurf | `.windsurfrules` |
 
-> **📋 Copy-paste rules** (adjust paths to your project — this one fits Next.js):
+> **📋 Copy-paste rules** (adjust paths — this fits Next.js):
 
 ```markdown
 ## Figma asset rules
-- Icons: always SVG, into public/icons/. Never export icons as PNG.
-- Images: PNG into public/images/, exported at the size they are actually
-  displayed. Use 2x only for small fixed-size images that must stay sharp
-  on retina screens; never blanket-export everything at 2x.
-- File names: kebab-case, English, descriptive (arrow-left.svg, hero-banner.png).
-  Ignore the Figma layer names if they are messy.
-- Design tokens: read them with get_variable_defs and map to our theme config.
-- After building a screen, take a screenshot and fix issues before finishing.
+- Icons: SVG into public/icons/. Images: PNG into public/images/.
+- File names: kebab-case English (arrow-left.svg, hero-banner.png).
+- Read design tokens with get_variable_defs; map them to our theme config.
+- After building a screen, screenshot and fix issues before finishing.
 ```
 
 ## 🔧 Troubleshooting

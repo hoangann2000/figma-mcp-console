@@ -2,7 +2,15 @@
 // Receives {id, command, params} from the Go bridge (relayed through ui.html),
 // executes it against the Figma Plugin API, and replies {id, result|error}.
 
-figma.showUI(__html__, { width: 300, height: 128 });
+figma.showUI(__html__, { width: 300, height: 132 });
+
+// Tell the UI which file this plugin window runs in; the UI forwards it to
+// the bridge on every (re)connect so calls can be routed per file when
+// several files run the plugin at once. figma.fileKey is undefined for
+// non-published dev plugins, so the file name is the primary identifier.
+figma.ui.postMessage({
+  register: { key: figma.fileKey || undefined, name: figma.root.name },
+});
 
 // ---------- helpers ----------
 

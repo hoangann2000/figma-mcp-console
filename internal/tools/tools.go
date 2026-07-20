@@ -32,12 +32,22 @@ func downloadTimeout(items int) time.Duration {
 	return d
 }
 
+// fileArg routes a call when several Figma files run the plugin at once.
+// Embed it in every tool's args struct.
+type fileArg struct {
+	File string `json:"file,omitempty" jsonschema:"which connected Figma file to act on: its file name (case-insensitive, unique substring ok) or file key, see list_files. Omit when only one file is connected"`
+}
+
+func (f fileArg) fileTarget() string { return f.File }
+
+type fileTargeted interface{ fileTarget() string }
+
 // registerBridged wires an MCP tool named name straight to the plugin
 // command of the same name: typed args in, raw JSON result out as text.
-func registerBridged[In any](s *mcp.Server, b *bridge.Bridge, name, desc string, timeout time.Duration) {
+func registerBridged[In fileTargeted](s *mcp.Server, b *bridge.Router, name, desc string, timeout time.Duration) {
 	mcp.AddTool(s, &mcp.Tool{Name: name, Description: desc},
 		func(ctx context.Context, req *mcp.CallToolRequest, args In) (*mcp.CallToolResult, any, error) {
-			raw, err := b.CallTimeout(ctx, name, args, timeout)
+			raw, err := b.Call(ctx, args.fileTarget(), name, args, timeout)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -47,14 +57,16 @@ func registerBridged[In any](s *mcp.Server, b *bridge.Bridge, name, desc string,
 		})
 }
 
-type emptyArgs struct{}
+type emptyArgs struct{ fileArg }
 
 type nodeInfoArgs struct {
+	fileArg
 	NodeID string `json:"node_id" jsonschema:"Figma node ID, e.g. \"12:34\""`
 	Depth  int    `json:"depth,omitempty" jsonschema:"how many levels of children to include (default 2)"`
 }
 
 type createShapeArgs struct {
+	fileArg
 	Name      string  `json:"name,omitempty" jsonschema:"layer name"`
 	X         float64 `json:"x" jsonschema:"x position in the parent's coordinates"`
 	Y         float64 `json:"y" jsonschema:"y position in the parent's coordinates"`
@@ -65,6 +77,7 @@ type createShapeArgs struct {
 }
 
 type createTextArgs struct {
+	fileArg
 	Text          string   `json:"text" jsonschema:"text content"`
 	X             float64  `json:"x" jsonschema:"x position in the parent's coordinates"`
 	Y             float64  `json:"y" jsonschema:"y position in the parent's coordinates"`
@@ -81,6 +94,7 @@ type createTextArgs struct {
 }
 
 type findArgs struct {
+	fileArg
 	NodeID     string   `json:"node_id,omitempty" jsonschema:"subtree to search in (default: current page)"`
 	Name       string   `json:"name,omitempty" jsonschema:"case-insensitive substring to match against layer names"`
 	Text       string   `json:"text,omitempty" jsonschema:"case-insensitive substring to match against TEXT node content"`
@@ -89,21 +103,25 @@ type findArgs struct {
 }
 
 type groupArgs struct {
+	fileArg
 	NodeIDs []string `json:"node_ids" jsonschema:"nodes to group; the group is created in the first node's parent"`
 	Name    string   `json:"name,omitempty" jsonschema:"group name"`
 }
 
 type ungroupArgs struct {
+	fileArg
 	NodeIDs []string `json:"node_ids" jsonschema:"GROUP or FRAME nodes to ungroup, releasing their children to the parent"`
 }
 
 type appendChildrenArgs struct {
+	fileArg
 	ParentID string   `json:"parent_id" jsonschema:"new parent node ID (frame, group, section or page)"`
 	NodeIDs  []string `json:"node_ids" jsonschema:"nodes to move into the new parent"`
 	Index    *int     `json:"index,omitempty" jsonschema:"insert position among the parent's children (default: append at the end)"`
 }
 
 type cloneArgs struct {
+	fileArg
 	NodeID   string   `json:"node_id" jsonschema:"node to clone"`
 	X        *float64 `json:"x,omitempty" jsonschema:"x position for the copy"`
 	Y        *float64 `json:"y,omitempty" jsonschema:"y position for the copy"`
@@ -112,11 +130,13 @@ type cloneArgs struct {
 }
 
 type listFontsArgs struct {
+	fileArg
 	Family      string `json:"family,omitempty" jsonschema:"case-insensitive substring to filter font families"`
 	MaxFamilies int    `json:"max_families,omitempty" jsonschema:"maximum families to return (default 50)"`
 }
 
 type setTextArgs struct {
+	fileArg
 	NodeID string `json:"node_id" jsonschema:"ID of a TEXT node"`
 	Text   string `json:"text" jsonschema:"new text content"`
 }
@@ -134,6 +154,7 @@ type gradientSpec struct {
 }
 
 type setFillArgs struct {
+	fileArg
 	NodeID   string        `json:"node_id" jsonschema:"target node ID"`
 	Color    string        `json:"color,omitempty" jsonschema:"solid fill as hex, e.g. #FF5733 (omit when using gradient)"`
 	Gradient *gradientSpec `json:"gradient,omitempty" jsonschema:"gradient fill instead of a solid color"`
@@ -141,6 +162,7 @@ type setFillArgs struct {
 }
 
 type createLineArgs struct {
+	fileArg
 	X            float64  `json:"x" jsonschema:"x position in the parent's coordinates"`
 	Y            float64  `json:"y" jsonschema:"y position in the parent's coordinates"`
 	Length       float64  `json:"length" jsonschema:"line length in pixels"`
@@ -152,6 +174,7 @@ type createLineArgs struct {
 }
 
 type importImageArgs struct {
+	fileArg
 	Source    string  `json:"source" jsonschema:"image to import: an http(s) URL or a file path relative to the project directory"`
 	NodeID    string  `json:"node_id,omitempty" jsonschema:"existing node to apply the image to as a fill; omit to create a new rectangle"`
 	X         float64 `json:"x,omitempty" jsonschema:"x position for the new rectangle"`
@@ -170,6 +193,7 @@ type moveItem struct {
 }
 
 type moveArgs struct {
+	fileArg
 	Items []moveItem `json:"items" jsonschema:"nodes to move with their new positions"`
 }
 
@@ -180,14 +204,17 @@ type resizeItem struct {
 }
 
 type resizeArgs struct {
+	fileArg
 	Items []resizeItem `json:"items" jsonschema:"nodes to resize with their new sizes"`
 }
 
 type deleteArgs struct {
+	fileArg
 	NodeIDs []string `json:"node_ids" jsonschema:"node IDs to delete"`
 }
 
 type autoLayoutArgs struct {
+	fileArg
 	NodeID            string   `json:"node_id" jsonschema:"frame or component node ID"`
 	LayoutMode        string   `json:"layout_mode" jsonschema:"HORIZONTAL, VERTICAL, or NONE to remove auto-layout"`
 	ItemSpacing       *float64 `json:"item_spacing,omitempty" jsonschema:"gap between children in pixels"`
@@ -203,6 +230,7 @@ type autoLayoutArgs struct {
 }
 
 type cornerRadiusArgs struct {
+	fileArg
 	NodeID      string   `json:"node_id" jsonschema:"target node ID"`
 	Radius      *float64 `json:"radius,omitempty" jsonschema:"uniform radius for all corners"`
 	TopLeft     *float64 `json:"top_left,omitempty" jsonschema:"top-left corner radius"`
@@ -212,6 +240,7 @@ type cornerRadiusArgs struct {
 }
 
 type strokesArgs struct {
+	fileArg
 	NodeID  string   `json:"node_id" jsonschema:"target node ID"`
 	Color   string   `json:"color,omitempty" jsonschema:"solid stroke color as hex, e.g. #333333; omit to remove all strokes"`
 	Weight  *float64 `json:"weight,omitempty" jsonschema:"stroke thickness in pixels"`
@@ -230,6 +259,7 @@ type effectSpec struct {
 }
 
 type effectsArgs struct {
+	fileArg
 	NodeID  string       `json:"node_id" jsonschema:"target node ID"`
 	Effects []effectSpec `json:"effects" jsonschema:"effects to set, replacing existing ones; empty list removes all effects"`
 }
@@ -242,6 +272,7 @@ type downloadItem struct {
 }
 
 type downloadArgs struct {
+	fileArg
 	Items []downloadItem `json:"items" jsonschema:"assets to export, one file per node"`
 }
 
@@ -255,14 +286,17 @@ type exportResult struct {
 }
 
 type setSelectionArgs struct {
+	fileArg
 	NodeIDs []string `json:"node_ids" jsonschema:"node IDs to select and scroll into view"`
 }
 
 type createComponentArgs struct {
+	fileArg
 	NodeID string `json:"node_id" jsonschema:"FRAME node to convert into a reusable COMPONENT"`
 }
 
 type createInstanceArgs struct {
+	fileArg
 	ComponentID string   `json:"component_id" jsonschema:"COMPONENT node ID to instantiate"`
 	X           *float64 `json:"x,omitempty" jsonschema:"x position for the instance"`
 	Y           *float64 `json:"y,omitempty" jsonschema:"y position for the instance"`
@@ -270,21 +304,25 @@ type createInstanceArgs struct {
 }
 
 type swapComponentArgs struct {
+	fileArg
 	InstanceID  string `json:"instance_id" jsonschema:"INSTANCE node to swap"`
 	ComponentID string `json:"component_id" jsonschema:"COMPONENT to swap the instance to"`
 }
 
 type detachInstanceArgs struct {
+	fileArg
 	InstanceID string `json:"instance_id" jsonschema:"INSTANCE node to detach into a plain frame"`
 }
 
 type paintStyleArgs struct {
+	fileArg
 	Name    string   `json:"name" jsonschema:"style name, e.g. color/primary"`
 	Color   string   `json:"color" jsonschema:"solid color as hex, e.g. #1E90FF"`
 	Opacity *float64 `json:"opacity,omitempty" jsonschema:"paint opacity 0..1 (default 1)"`
 }
 
 type textStyleArgs struct {
+	fileArg
 	Name       string  `json:"name" jsonschema:"style name, e.g. text/heading-1"`
 	FontFamily string  `json:"font_family,omitempty" jsonschema:"font family (default Inter)"`
 	FontStyle  string  `json:"font_style,omitempty" jsonschema:"font style, e.g. Bold (default Regular)"`
@@ -292,27 +330,32 @@ type textStyleArgs struct {
 }
 
 type effectStyleArgs struct {
+	fileArg
 	Name    string       `json:"name" jsonschema:"style name, e.g. effect/card-shadow"`
 	Effects []effectSpec `json:"effects" jsonschema:"effects for the style"`
 }
 
 type applyStyleArgs struct {
+	fileArg
 	NodeID  string `json:"node_id" jsonschema:"target node ID"`
 	StyleID string `json:"style_id" jsonschema:"style ID from get_local_styles or a create_*_style result"`
 	Target  string `json:"target,omitempty" jsonschema:"for PAINT styles: fill (default) or stroke"`
 }
 
 type variableCollectionArgs struct {
+	fileArg
 	Name     string `json:"name" jsonschema:"collection name, e.g. colors"`
 	ModeName string `json:"mode_name,omitempty" jsonschema:"rename the default mode, e.g. light"`
 }
 
 type addVariableModeArgs struct {
+	fileArg
 	CollectionID string `json:"collection_id" jsonschema:"variable collection ID"`
 	Name         string `json:"name" jsonschema:"new mode name, e.g. dark"`
 }
 
 type createVariableArgs struct {
+	fileArg
 	Name         string `json:"name" jsonschema:"variable name, e.g. color/bg/primary"`
 	CollectionID string `json:"collection_id" jsonschema:"variable collection ID"`
 	Type         string `json:"type" jsonschema:"COLOR, FLOAT, STRING, or BOOLEAN"`
@@ -320,18 +363,21 @@ type createVariableArgs struct {
 }
 
 type setVariableValueArgs struct {
+	fileArg
 	VariableID string `json:"variable_id" jsonschema:"variable ID"`
 	Value      any    `json:"value" jsonschema:"new value; hex string for COLOR variables"`
 	ModeID     string `json:"mode_id,omitempty" jsonschema:"mode to set (default: the collection's default mode)"`
 }
 
 type setBoundVariableArgs struct {
+	fileArg
 	NodeID     string `json:"node_id" jsonschema:"target node ID"`
 	Field      string `json:"field" jsonschema:"node field to bind: fills, strokes, width, height, opacity, cornerRadius, itemSpacing, ..."`
 	VariableID string `json:"variable_id" jsonschema:"variable to bind to the field"`
 }
 
 type screenshotArgs struct {
+	fileArg
 	NodeID string  `json:"node_id,omitempty" jsonschema:"node to capture (default: current selection, else current page)"`
 	Scale  float64 `json:"scale,omitempty" jsonschema:"export scale 0.5..4 (default 1)"`
 }
@@ -343,7 +389,29 @@ type screenshotResult struct {
 }
 
 // Register adds all Figma tools to the MCP server.
-func Register(s *mcp.Server, b *bridge.Bridge) {
+func Register(s *mcp.Server, b *bridge.Router) {
+	// list_files is answered by the bridge itself, not a plugin.
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "list_files",
+		Description: "List the Figma files currently connected to the bridge (one per open plugin window). " +
+			"When several files are connected, pass one of the returned names as the file parameter of the other tools.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
+		files, err := b.Files(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
+		if len(files) == 0 {
+			return nil, nil, bridge.ErrNotConnected
+		}
+		out, err := json.MarshalIndent(files, "", "  ")
+		if err != nil {
+			return nil, nil, err
+		}
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: string(out)}},
+		}, nil, nil
+	})
+
 	registerBridged[emptyArgs](s, b, "get_metadata",
 		"Get the current Figma document: file name, current page, and a summary of the page's top-level layers.",
 		bridge.DefaultTimeout)
@@ -473,7 +541,7 @@ func Register(s *mcp.Server, b *bridge.Bridge) {
 		Description: "Export a PNG screenshot of a node (or the current selection, or the whole page) " +
 			"and return it as an image. Use this to visually verify designs.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args screenshotArgs) (*mcp.CallToolResult, any, error) {
-		raw, err := b.CallTimeout(ctx, "get_screenshot", args, screenshotTimeout)
+		raw, err := b.Call(ctx, args.File, "get_screenshot", args, screenshotTimeout)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -504,7 +572,7 @@ func Register(s *mcp.Server, b *bridge.Bridge) {
 		if err != nil {
 			return nil, nil, err
 		}
-		raw, err := b.CallTimeout(ctx, "import_image", map[string]any{
+		raw, err := b.Call(ctx, args.File, "import_image", map[string]any{
 			"data":       base64.StdEncoding.EncodeToString(data),
 			"node_id":    args.NodeID,
 			"x":          args.X,
@@ -570,7 +638,7 @@ func Register(s *mcp.Server, b *bridge.Bridge) {
 				"scale":   item.Scale,
 			}
 		}
-		raw, err := b.CallTimeout(ctx, "download_assets", map[string]any{"items": pluginItems}, downloadTimeout(len(args.Items)))
+		raw, err := b.Call(ctx, args.File, "download_assets", map[string]any{"items": pluginItems}, downloadTimeout(len(args.Items)))
 		if err != nil {
 			return nil, nil, err
 		}

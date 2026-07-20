@@ -1,5 +1,9 @@
 // figma-mcp is a stdio MCP server that lets AI clients read and write Figma
-// documents through a local WebSocket bridge to a Figma plugin.
+// documents through a local WebSocket bridge to the Figma plugin.
+//
+// All sessions on a machine share one bridge on a single port: the first
+// session to bind it serves every plugin window (one per open Figma file)
+// and every other session; see internal/bridge.Router.
 package main
 
 import (
@@ -8,6 +12,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -15,6 +21,8 @@ import (
 	"github.com/hoangann2000/figma-mcp-console/internal/tools"
 )
 
+// defaultPort must stay in sync with the plugin: both ui.html and the
+// manifest's devAllowedDomains point at ws://localhost:2000.
 const defaultPort = 2000
 
 func main() {
@@ -22,7 +30,7 @@ func main() {
 	log.SetOutput(os.Stderr)
 	log.SetPrefix("figma-mcp: ")
 
-	port := flag.Int("port", 0, "WebSocket bridge port (default $FIGMA_MCP_PORT or 2000)")
+	port := flag.Int("port", 0, "WebSocket bridge port (default $FIGMA_MCP_PORT, or 2000)")
 	flag.Parse()
 	if *port == 0 {
 		if env := os.Getenv("FIGMA_MCP_PORT"); env != "" {
@@ -33,19 +41,31 @@ func main() {
 		*port = defaultPort
 	}
 
-	b := bridge.New()
+	// Exit when the MCP client that spawned us dies. An orphaned session
+	// would otherwise linger in the bridge election forever.
 	go func() {
-		if err := b.Serve(fmt.Sprintf("127.0.0.1:%d", *port)); err != nil {
-			log.Fatalf("bridge failed: %v", err)
+		ppid := os.Getppid()
+		for range time.Tick(5 * time.Second) {
+			if os.Getppid() != ppid {
+				log.Print("mcp client exited, shutting down")
+				os.Exit(0)
+			}
 		}
 	}()
+
+	project := ""
+	if cwd, err := os.Getwd(); err == nil {
+		project = filepath.Base(cwd)
+	}
+	r := bridge.NewRouter(project, *port)
+	go r.Run()
 
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "figma-console",
 		Title:   "Figma MCP Console",
-		Version: "0.1.0",
+		Version: "0.3.0",
 	}, nil)
-	tools.Register(server, b)
+	tools.Register(server, r)
 	tools.RegisterPrompts(server)
 
 	if err := server.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
