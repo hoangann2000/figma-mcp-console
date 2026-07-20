@@ -25,6 +25,11 @@ import (
 // manifest's devAllowedDomains point at ws://localhost:2000.
 const defaultPort = 2000
 
+// version is the release version reported to the MCP client. It is injected
+// at build time from npm/package.json via -ldflags "-X main.version=<v>"
+// (see npm/build.sh) and defaults to "dev" for local `go run`/`go build`.
+var version = "dev"
+
 func main() {
 	// stdout is the MCP JSON-RPC transport; all logging must go to stderr.
 	log.SetOutput(os.Stderr)
@@ -63,7 +68,7 @@ func main() {
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "figma-console",
 		Title:   "Figma MCP Console",
-		Version: "0.5.0",
+		Version: version,
 	}, nil)
 	tools.Register(server, r)
 	tools.RegisterPrompts(server)

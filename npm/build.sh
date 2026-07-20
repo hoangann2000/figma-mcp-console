@@ -4,13 +4,17 @@ cd "$(dirname "$0")/.."          # về repo root
 
 OUT=npm/bin
 rm -rf "$OUT"
-echo "→ build 6 binary..."
+
+# Single source of truth for the version: npm/package.json. Injected into the
+# binary so the MCP server reports the same version it was published under.
+VERSION=$(node -p "require('./npm/package.json').version")
+echo "→ build 6 binary (v$VERSION)..."
 for t in "darwin arm64" "darwin amd64" "linux arm64" "linux amd64" "windows amd64" "windows arm64"; do
   set -- $t; GOOS=$1; GOARCH=$2; ext=""
   [ "$GOOS" = "windows" ] && ext=".exe"
   echo "   $GOOS-$GOARCH"
   CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH \
-    go build -trimpath -ldflags="-s -w" \
+    go build -trimpath -ldflags="-s -w -X main.version=$VERSION" \
     -o "$OUT/${GOOS}-${GOARCH}/figma-mcp${ext}" ./cmd/figma-mcp
 done
 
