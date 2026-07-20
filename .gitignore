@@ -2,4 +2,5 @@ bin/
 .mcp.json
 .claude/
 dist/
-plugin.zip
+npm/bin/
+npm/README.md

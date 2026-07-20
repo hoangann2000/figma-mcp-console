@@ -169,8 +169,8 @@ Standard MCP stdio transport — any client works. Set the command to `npx` with
 
 ### Step 2 — Install the Figma plugin
 
-1. Download **[plugin.zip](https://github.com/hoangann2000/figma-mcp-console/releases/latest)** and unzip it
-2. In **Figma Desktop**: **Plugins → Development → Import plugin from manifest…** → select `manifest.json` *(one-time step)*
+1. Run **`npx figma-mcp-console install-plugin`** — it writes the plugin files locally and prints the path to `manifest.json`
+2. In **Figma Desktop**: **Plugins → Development → Import plugin from manifest…** → select that `manifest.json` *(one-time step)*
 3. Run it: **Plugins → Development → Figma MCP Console** — and **keep the plugin window open** while you work. 🟢 Green dot = connected
 4. Working with several Figma files at once? Run the plugin in **each** file — every window connects to the same local bridge, and the AI picks the right file per call
 
@@ -232,7 +232,7 @@ Exports follow the file extension the AI picks (`.svg` for vector, `.png`/`.jpg`
 | ❌ "no Figma plugin is connected" | Open the plugin in Figma Desktop (**Plugins → Development → Figma MCP Console**) and keep its window open — in every file you want the AI to touch |
 | 🕐 Plugin says "Searching for MCP server…" | Normal before your AI client connects — the server starts automatically with it. If it never connects, click the status line to retry, or restart your AI client |
 | 🗂 "N Figma files are connected; pass the file parameter" | More than one plugin window is open — tell the AI which file you mean (or close the extra plugin windows) |
-| 🚫 The MCP server doesn't appear in your AI tool | Check Node.js 18+ is installed (`node -v`); the first run also needs internet access to download the server |
+| 🚫 The MCP server doesn't appear in your AI tool | Check Node.js 18+ is installed (`node -v`) |
 | 📁 Exported files end up in the wrong folder | Register the server in the project-level config, not the global one (see the tip in Step 1) |
 | 🔤 Font errors when creating text | The Figma file uses a font not installed on your machine — the error message names it |
 
