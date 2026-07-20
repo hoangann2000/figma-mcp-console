@@ -24,20 +24,30 @@ const binPath = path.join(
   `figma-mcp${exe}`,
 );
 
-// Lệnh con: install-plugin
+// Lệnh con: install-plugin — trích plugin ra thư mục HIỆN RÕ (không có dấu chấm)
+// và tự mở folder đó lên để user thấy ngay manifest.json.
 if (process.argv[2] === "install-plugin") {
   const srcDir = path.join(__dirname, "bin", "plugin");
-  const destDir = path.join(os.homedir(), ".figma-mcp-console", "plugin");
+  const destDir = path.join(os.homedir(), "figma-mcp-console-plugin");
   fs.mkdirSync(destDir, { recursive: true });
   for (const f of ["code.js", "ui.html", "manifest.json"])
     fs.copyFileSync(path.join(srcDir, f), path.join(destDir, f));
+
   process.stdout.write(
-    "Plugin đã cài. Trong Figma Desktop:\n" +
-      "  Plugins → Development → Import plugin from manifest…\n" +
-      "  Chọn file:\n    " +
+    "\n✅ Figma plugin ready.\n\n" +
+      "In Figma Desktop → Plugins → Development → Import plugin from manifest…\n" +
+      "and select this file:\n\n" +
+      "   " +
       path.join(destDir, "manifest.json") +
-      "\n",
+      "\n\n",
   );
+
+  // Tự mở folder trong trình quản lý file (best-effort; lỗi thì bỏ qua).
+  const opener =
+    plat === "darwin" ? "open" : plat === "windows" ? "explorer" : "xdg-open";
+  try {
+    spawnSync(opener, [destDir], { stdio: "ignore", detached: true });
+  } catch (_) {}
   process.exit(0);
 }
 

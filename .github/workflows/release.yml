@@ -1,0 +1,24 @@
+name: release
+
+# Khi push tag vX.Y.Z → đóng gói plugin/ thành plugin.zip và tạo GitHub Release.
+# (Binary phân phối qua npm, không cần build ở đây.)
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Package Figma plugin
+        run: cd plugin && zip -r ../plugin.zip .
+
+      - name: Create GitHub release with plugin.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "${GITHUB_REF_NAME}" plugin.zip --title "${GITHUB_REF_NAME}" --generate-notes
