@@ -5,3 +5,7 @@ dist/
 plugin.zip
 npm/bin/
 npm/README.md
+
+# Local-only internal docs — never published
+document.md
+DOCUMENT.md

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cd "$(dirname "$0")/.."          # về repo root
+cd "$(dirname "$0")/.."          # go to repo root
 
 OUT=npm/bin
 rm -rf "$OUT"
@@ -8,7 +8,7 @@ rm -rf "$OUT"
 # Single source of truth for the version: npm/package.json. Injected into the
 # binary so the MCP server reports the same version it was published under.
 VERSION=$(node -p "require('./npm/package.json').version")
-echo "→ build 6 binary (v$VERSION)..."
+echo "→ building 6 binaries (v$VERSION)..."
 for t in "darwin arm64" "darwin amd64" "linux arm64" "linux amd64" "windows amd64" "windows arm64"; do
   set -- $t; GOOS=$1; GOARCH=$2; ext=""
   [ "$GOOS" = "windows" ] && ext=".exe"
@@ -21,4 +21,4 @@ done
 echo "→ copy plugin..."
 mkdir -p "$OUT/plugin"
 cp plugin/code.js plugin/ui.html plugin/manifest.json "$OUT/plugin/"
-echo "✅ xong → npm/bin/"
+echo "✅ done → npm/bin/"
