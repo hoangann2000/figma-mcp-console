@@ -1,7 +1,7 @@
 name: release
 
-# Khi push tag vX.Y.Z → đóng gói plugin/ thành plugin.zip và tạo GitHub Release.
-# (Binary phân phối qua npm, không cần build ở đây.)
+# On pushing tag vX.Y.Z → package plugin/ into plugin.zip and create a GitHub Release.
+# (Binaries are distributed via npm; no build needed here.)
 on:
   push:
     tags: ["v*"]

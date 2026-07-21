@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Chạy Go binary đi kèm trong gói npm — KHÔNG tải mạng/GitHub.
-// stdout là transport MCP → mọi log của wrapper ra stderr.
+// Run the Go binary bundled in the npm package — NO network/GitHub download.
+// stdout is the MCP transport → all wrapper logs go to stderr.
 "use strict";
 const { spawnSync } = require("child_process");
 const fs = require("fs");
@@ -24,8 +24,8 @@ const binPath = path.join(
   `figma-mcp${exe}`,
 );
 
-// Lệnh con: install-plugin — trích plugin ra thư mục HIỆN RÕ (không có dấu chấm)
-// và tự mở folder đó lên để user thấy ngay manifest.json.
+// Subcommand: install-plugin — extract the plugin into a VISIBLE folder (no leading dot)
+// and open that folder so the user sees manifest.json right away.
 if (process.argv[2] === "install-plugin") {
   const srcDir = path.join(__dirname, "bin", "plugin");
   const destDir = path.join(os.homedir(), "figma-mcp-console-plugin");
@@ -42,7 +42,7 @@ if (process.argv[2] === "install-plugin") {
       "\n\n",
   );
 
-  // Tự mở folder trong trình quản lý file (best-effort; lỗi thì bỏ qua).
+  // Open the folder in the file manager (best-effort; ignore errors).
   const opener =
     plat === "darwin" ? "open" : plat === "windows" ? "explorer" : "xdg-open";
   try {
@@ -51,10 +51,10 @@ if (process.argv[2] === "install-plugin") {
   process.exit(0);
 }
 
-if (!fs.existsSync(binPath)) fail(`không tìm thấy binary cho ${plat}-${arch}`);
+if (!fs.existsSync(binPath)) fail(`binary not found for ${plat}-${arch}`);
 try {
   fs.chmodSync(binPath, 0o755);
 } catch (_) {}
 const r = spawnSync(binPath, process.argv.slice(2), { stdio: "inherit" });
-if (r.error) fail(`không khởi động được server: ${r.error.message}`);
+if (r.error) fail(`failed to start server: ${r.error.message}`);
 process.exit(r.status === null ? 1 : r.status);
