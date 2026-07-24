@@ -365,6 +365,7 @@
     { key: "all", label: "All" },
     { key: "frame", label: "Frame" },
     { key: "vector", label: "Vector" },
+    { key: "instance", label: "Instance" },
   ];
 
   function esc(s) {
@@ -378,14 +379,23 @@
   function matches(it) {
     if (selFilter === "frame") return it.type === "FRAME";
     if (selFilter === "vector") return it.type === "VECTOR";
+    if (selFilter === "instance") return it.type === "INSTANCE";
     return true;
   }
 
-  // Copyable text for one item, in the requested format:
+  // Frames copy as a link block; every other element copies its exported SVG.
+  function copyLabelFor(it) {
+    return it.type === "FRAME" ? "Copy" : "Copy SVG";
+  }
+
+  // Copyable text for one item. Frames use the requested link format:
   //   # <name>:
   //   <link>
-  function fmt(it) {
-    return "# " + it.name + ":\n" + (it.link || "");
+  // Other elements return their SVG (or the export error, so the click still
+  // gives feedback instead of silently copying nothing).
+  function copyValueForItem(it) {
+    if (it.type === "FRAME") return "# " + it.name + ":\n" + (it.link || "");
+    return it.svg || it.svgError || "";
   }
 
   function renderSelection(items) {
@@ -402,7 +412,10 @@
     }
     shownItems = selItems.filter(matches);
 
-    const keyPrompt = hasKey
+    // Only frames need a link (and therefore the file key); a pure vector /
+    // instance selection copies SVG, so don't nag for a URL then.
+    const needsKey = !hasKey && selItems.some((it) => it.type === "FRAME");
+    const keyPrompt = !needsKey
       ? ""
       : '<div class="key-prompt">' +
       '<div class="key-note">Links are empty: this file has no key yet. Paste the file URL once ' +
@@ -434,7 +447,7 @@
             '<div class="res-row">' +
             '<span class="res-name" title="' + esc(it.name) + '">' + esc(it.name) + "</span>" +
             '<span class="res-type">' + esc(it.type) + "</span>" +
-            '<button class="copy-btn" data-i="' + i + '">Copy</button>' +
+            '<button class="copy-btn" data-i="' + i + '">' + copyLabelFor(it) + "</button>" +
             "</div>",
         )
         .join("") +
@@ -445,14 +458,15 @@
     box.className = "show";
   }
 
-  // What each button copies: a row copies its own "# name:\nlink" block;
-  // "Copy all" joins every shown item's block with a blank line between.
+  // What each button copies: a row copies its own value (link block for a
+  // frame, SVG otherwise); "Copy all" joins every shown item with a blank
+  // line between — filter to one type first for a homogeneous result.
   function copyValueFor(btn) {
     if (btn.hasAttribute("data-all")) {
-      return shownItems.map(fmt).join("\n\n");
+      return shownItems.map(copyValueForItem).join("\n\n");
     }
     const it = shownItems[+btn.getAttribute("data-i")];
-    return it ? fmt(it) : "";
+    return it ? copyValueForItem(it) : "";
   }
 
   // navigator.clipboard is often unavailable in the plugin iframe, so use the
