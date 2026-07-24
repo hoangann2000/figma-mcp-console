@@ -416,7 +416,9 @@ func Register(s *mcp.Server, b *bridge.Router) {
 		"Get the current Figma document: file name, current page, and a summary of the page's top-level layers.",
 		bridge.DefaultTimeout)
 	registerBridged[emptyArgs](s, b, "get_selection",
-		"Get the nodes currently selected in Figma, with id, name, type, position and size.",
+		"Get the nodes currently selected in Figma, with id, name, type, position and size. "+
+			"Each item also carries a shareable figma.com link to that frame/section when the file is saved to Figma, "+
+			"so selecting several frames returns their names paired with links.",
 		bridge.DefaultTimeout)
 	registerBridged[nodeInfoArgs](s, b, "get_design_context",
 		"Get detailed information about a node (geometry, fills, text content) including its children up to the given depth.",

@@ -41,6 +41,38 @@ function summarize(n) {
   return s;
 }
 
+// The file key needed to build share links. Published plugins can read it from
+// figma.fileKey, but development plugins (imported from a manifest) cannot, so
+// we fall back to a key the user pastes once — their file URL — persisted in
+// the file via pluginData so it survives reopening.
+const FILE_KEY_DATA = "figma-mcp-file-key";
+let fileKey = figma.fileKey || "";
+try {
+  if (!fileKey) fileKey = figma.root.getPluginData(FILE_KEY_DATA) || "";
+} catch (e) {}
+
+function setFileKey(key) {
+  fileKey = key || "";
+  try {
+    figma.root.setPluginData(FILE_KEY_DATA, fileKey);
+  } catch (e) {}
+}
+
+// nodeLink builds a shareable figma.com URL that jumps straight to a node (the
+// same link as Figma's "Copy link to selection"). Returns null when no file
+// key is known yet, so callers simply omit the link.
+function nodeLink(id) {
+  if (!fileKey) return null;
+  return (
+    "https://www.figma.com/design/" +
+    fileKey +
+    "/" +
+    encodeURIComponent(figma.root.name) +
+    "?node-id=" +
+    id.replace(/:/g, "-")
+  );
+}
+
 function serialize(n, depth) {
   const s = summarize(n);
   if ("visible" in n) s.visible = n.visible;
@@ -158,7 +190,12 @@ const handlers = {
   },
 
   async get_selection() {
-    return figma.currentPage.selection.map(summarize);
+    return figma.currentPage.selection.map((n) => {
+      const s = summarize(n);
+      const link = nodeLink(n.id);
+      if (link) s.link = link;
+      return s;
+    });
   },
 
   async get_design_context(params) {
@@ -714,10 +751,59 @@ const handlers = {
   },
 };
 
+// ---------- live selection panel ----------
+// Mirror the current selection into the plugin window so the user can grab a
+// frame's name and shareable link without going through the AI. Refreshes on
+// every selection change and resizes the window to fit the list.
+// selectionGen guards against stale posts: SVG export is async, so a newer
+// selection change may land while an older one is still exporting.
+let selectionGen = 0;
+
+async function postSelection() {
+  const gen = ++selectionGen;
+  const sel = figma.currentPage.selection;
+  const items = [];
+  for (const n of sel) {
+    const item = { name: n.name, type: n.type, link: nodeLink(n.id) };
+    // Frames are copied as links; every other element (vectors, instances, …)
+    // is copied as SVG, so pre-export it now to keep the UI copy synchronous
+    // (clipboard writes must happen inside the click gesture). Skip huge
+    // selections to avoid stalling on a big export the user won't copy.
+    if (n.type !== "FRAME" && sel.length <= 50 && typeof n.exportAsync === "function") {
+      try {
+        item.svg = await n.exportAsync({ format: "SVG_STRING" });
+      } catch (e) {
+        item.svgError = String((e && e.message) || e);
+      }
+      if (gen !== selectionGen) return; // superseded by a newer selection
+    }
+    items.push(item);
+  }
+  const needsKey = !fileKey && items.some((it) => it.type === "FRAME");
+  figma.ui.postMessage({ selection: items, hasKey: !!fileKey });
+  // Room for: base card + filter bar (30) + optional Copy-all header (22) +
+  // the paste-URL prompt when a frame needs a key (64) + up to 6 visible rows
+  // (the list scrolls beyond that).
+  const rows = Math.min(items.length, 6);
+  const h = items.length
+    ? 162 + (items.length > 1 ? 22 : 0) + (needsKey ? 64 : 0) + rows * 30
+    : 132;
+  figma.ui.resize(300, h);
+}
+figma.on("selectionchange", postSelection);
+postSelection();
+
 // ---------- dispatch ----------
 
 figma.ui.onmessage = async (msg) => {
-  if (!msg || !msg.id || !msg.command) return;
+  if (!msg) return;
+  // Control message from the UI: the user pasted the file URL to enable links.
+  if (typeof msg.setFileKey === "string") {
+    setFileKey(msg.setFileKey);
+    postSelection();
+    return;
+  }
+  if (!msg.id || !msg.command) return;
   const h = handlers[msg.command];
   try {
     if (!h) throw new Error("unknown command: " + msg.command);
