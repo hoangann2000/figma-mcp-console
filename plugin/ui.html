@@ -2,10 +2,12 @@
   * {
     box-sizing: border-box;
   }
+
   html,
   body {
     height: 100%;
   }
+
   body {
     font:
       12px/1.5 -apple-system,
@@ -19,6 +21,7 @@
     display: flex;
     flex-direction: column;
   }
+
   .card {
     background: #fff;
     border: 1px solid #e6e8f0;
@@ -26,6 +29,7 @@
     padding: 9px 11px;
     box-shadow: 0 1px 2px rgba(30, 34, 60, 0.04);
   }
+
   #status-row {
     display: flex;
     align-items: center;
@@ -35,6 +39,7 @@
     font-size: 13px;
     color: #1f2330;
   }
+
   #dot {
     flex: none;
     width: 9px;
@@ -46,16 +51,181 @@
       background 0.2s,
       box-shadow 0.2s;
   }
+
   #dot.on {
     background: #22a06b;
     box-shadow: 0 0 0 3px rgba(34, 160, 107, 0.15);
   }
+
   #hint {
     color: #6b6f7d;
     margin-top: 8px;
     font-size: 11px;
     line-height: 1.45;
   }
+
+  #result {
+    display: none;
+    margin-top: 10px;
+    border-top: 1px solid #eceef5;
+    padding-top: 9px;
+  }
+
+  #result.show {
+    display: block;
+  }
+
+  .res-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+  }
+
+  .res-title {
+    font-weight: 600;
+    font-size: 11px;
+    color: #1f2330;
+  }
+
+  .res-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 190px;
+    overflow: auto;
+  }
+
+  .res-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 7px;
+    border: 1px solid #e6e8f0;
+    border-radius: 7px;
+    background: #fbfcfe;
+  }
+
+  .res-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px;
+    color: #2c2c34;
+  }
+
+  .res-type {
+    flex: none;
+    font-size: 9px;
+    color: #a0a4b0;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+
+  .copy-btn {
+    flex: none;
+    border: 1px solid #d6d9e6;
+    background: #fff;
+    color: #4b5168;
+    border-radius: 6px;
+    padding: 2px 8px;
+    font-size: 10px;
+    cursor: pointer;
+  }
+
+  .copy-btn:hover {
+    background: #f0f2f8;
+  }
+
+  .copy-btn.done {
+    color: #22a06b;
+    border-color: #bfe6d3;
+    background: #f0faf5;
+  }
+
+  .copy-all {
+    padding: 1px 6px;
+    font-size: 10px;
+  }
+
+  .filter-row {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 8px;
+  }
+
+  .filter-btn {
+    flex: none;
+    border: 1px solid #d6d9e6;
+    background: #fff;
+    color: #6b6f7d;
+    border-radius: 6px;
+    padding: 3px 9px;
+    font-size: 10px;
+    cursor: pointer;
+  }
+
+  .filter-btn:hover {
+    background: #f0f2f8;
+  }
+
+  .filter-btn.on {
+    background: #2c2c34;
+    border-color: #2c2c34;
+    color: #fff;
+  }
+
+  .res-empty {
+    font-size: 11px;
+    color: #a0a4b0;
+    padding: 6px 2px;
+  }
+
+  .key-prompt {
+    margin-bottom: 8px;
+    padding: 7px 8px;
+    border: 1px solid #ffe0a6;
+    background: #fff9ec;
+    border-radius: 7px;
+  }
+
+  .key-note {
+    font-size: 10px;
+    color: #8a6d3b;
+    line-height: 1.4;
+    margin-bottom: 5px;
+  }
+
+  .key-input-row {
+    display: flex;
+    gap: 4px;
+  }
+
+  .key-input {
+    flex: 1;
+    min-width: 0;
+    border: 1px solid #d6d9e6;
+    border-radius: 6px;
+    padding: 3px 6px;
+    font-size: 10px;
+  }
+
+  .key-save {
+    flex: none;
+    border: 1px solid #d6d9e6;
+    background: #fff;
+    border-radius: 6px;
+    padding: 3px 10px;
+    font-size: 10px;
+    cursor: pointer;
+  }
+
+  .key-save:hover {
+    background: #f0f2f8;
+  }
+
   #credit {
     margin-top: auto;
     padding-top: 10px;
@@ -63,10 +233,12 @@
     color: #a0a4b0;
     font-size: 10px;
   }
+
   #credit a {
     color: #8288a0;
     text-decoration: none;
   }
+
   #credit a:hover {
     text-decoration: underline;
   }
@@ -80,11 +252,11 @@
     Keep this window open while AI works. Open the plugin in each file you want
     it to edit.
   </div>
+  <div id="result"></div>
 </div>
 <div id="credit">
-  <a href="https://github.com/hoangann2000/figma-mcp-console" target="_blank"
-    >@hoangann2000</a
-  >
+  <a href="https://github.com/hoangann2000/figma-mcp-console" target="_blank">@hoangann2000</a>
+  <a href="https://github.com/fuvavi" target="_blank">@fuvavi</a>
 </div>
 
 <script>
@@ -160,7 +332,7 @@
     sock.onerror = () => {
       try {
         sock.close();
-      } catch (e) {}
+      } catch (e) { }
     };
   }
 
@@ -173,8 +345,164 @@
     }, RETRY);
   }
 
+  // ---- live selection list (name + copyable link, filterable by type) ----
+  let selItems = []; // everything currently selected in Figma
+  let shownItems = []; // selItems after the active type filter
+  let selFilter = "all"; // all | frame | vector
+  let hasKey = false; // whether the main thread knows this file's key
+
+  // Pull the file key out of a pasted Figma URL (…/design/<key>/…), or accept
+  // a bare key. Returns "" when nothing usable is found.
+  function parseFileKey(s) {
+    s = (s || "").trim();
+    const m = s.match(/figma\.com\/(?:file|design|board|proto)\/([A-Za-z0-9]+)/i);
+    if (m) return m[1];
+    if (/^[A-Za-z0-9]{10,}$/.test(s)) return s;
+    return "";
+  }
+
+  const FILTERS = [
+    { key: "all", label: "All" },
+    { key: "frame", label: "Frame" },
+    { key: "vector", label: "Vector" },
+  ];
+
+  function esc(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function matches(it) {
+    if (selFilter === "frame") return it.type === "FRAME";
+    if (selFilter === "vector") return it.type === "VECTOR";
+    return true;
+  }
+
+  // Copyable text for one item, in the requested format:
+  //   # <name>:
+  //   <link>
+  function fmt(it) {
+    return "# " + it.name + ":\n" + (it.link || "");
+  }
+
+  function renderSelection(items) {
+    if (items) selItems = items;
+    drawSelection();
+  }
+
+  function drawSelection() {
+    const box = document.getElementById("result");
+    if (!selItems.length) {
+      box.className = "";
+      box.innerHTML = "";
+      return;
+    }
+    shownItems = selItems.filter(matches);
+
+    const keyPrompt = hasKey
+      ? ""
+      : '<div class="key-prompt">' +
+      '<div class="key-note">Links are empty: this file has no key yet. Paste the file URL once ' +
+      "(Share → Copy link, or the browser address bar):</div>" +
+      '<div class="key-input-row">' +
+      '<input class="key-input" id="key-input" placeholder="https://www.figma.com/design/…" />' +
+      '<button class="key-save" id="key-save">Save</button>' +
+      "</div></div>";
+
+    const filterBar =
+      '<div class="filter-row">' +
+      FILTERS.map(
+        (f) =>
+          '<button class="filter-btn' + (selFilter === f.key ? " on" : "") + '" data-f="' + f.key + '">' +
+          f.label + "</button>",
+      ).join("") +
+      "</div>";
+
+    const head =
+      '<div class="res-head"><span class="res-title">Selected (' + shownItems.length + ")</span>" +
+      (shownItems.length > 1 ? '<button class="copy-btn copy-all" data-all="1">Copy all</button>' : "") +
+      "</div>";
+
+    const body = shownItems.length
+      ? '<div class="res-list">' +
+      shownItems
+        .map(
+          (it, i) =>
+            '<div class="res-row">' +
+            '<span class="res-name" title="' + esc(it.name) + '">' + esc(it.name) + "</span>" +
+            '<span class="res-type">' + esc(it.type) + "</span>" +
+            '<button class="copy-btn" data-i="' + i + '">Copy</button>' +
+            "</div>",
+        )
+        .join("") +
+      "</div>"
+      : '<div class="res-empty">No matching nodes selected.</div>';
+
+    box.innerHTML = keyPrompt + filterBar + head + body;
+    box.className = "show";
+  }
+
+  // What each button copies: a row copies its own "# name:\nlink" block;
+  // "Copy all" joins every shown item's block with a blank line between.
+  function copyValueFor(btn) {
+    if (btn.hasAttribute("data-all")) {
+      return shownItems.map(fmt).join("\n\n");
+    }
+    const it = shownItems[+btn.getAttribute("data-i")];
+    return it ? fmt(it) : "";
+  }
+
+  // navigator.clipboard is often unavailable in the plugin iframe, so use the
+  // textarea + execCommand fallback which works reliably here.
+  function copyText(text) {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      document.execCommand("copy");
+    } catch (e) { }
+    document.body.removeChild(ta);
+  }
+
+  document.getElementById("result").addEventListener("click", (e) => {
+    if (e.target.id === "key-save") {
+      const inp = document.getElementById("key-input");
+      const key = parseFileKey(inp ? inp.value : "");
+      if (key) {
+        parent.postMessage({ pluginMessage: { setFileKey: key } }, "*");
+      } else if (inp) {
+        inp.value = "";
+        inp.placeholder = "Couldn't read a file key from that — paste the full URL";
+      }
+      return;
+    }
+    const fb = e.target.closest(".filter-btn");
+    if (fb) {
+      selFilter = fb.getAttribute("data-f");
+      drawSelection();
+      return;
+    }
+    const btn = e.target.closest(".copy-btn");
+    if (!btn) return;
+    copyText(copyValueFor(btn));
+    const old = btn.textContent;
+    btn.textContent = "Copied";
+    btn.classList.add("done");
+    setTimeout(() => {
+      btn.textContent = old;
+      btn.classList.remove("done");
+    }, 1200);
+  });
+
   // Relay plugin main-thread frames: the register frame is cached here and
-  // re-sent on every reconnect; everything else goes to the server.
+  // re-sent on every reconnect, the selection frame drives the list above, and
+  // everything else goes to the server.
   window.onmessage = (e) => {
     const msg = e.data.pluginMessage;
     if (!msg) return;
@@ -182,6 +510,11 @@
       reg = msg.register;
       sendRegister();
       if (ws) setStatus(true, label());
+      return;
+    }
+    if (Array.isArray(msg.selection)) {
+      hasKey = !!msg.hasKey;
+      renderSelection(msg.selection);
       return;
     }
     if (ws && ws.readyState === WebSocket.OPEN) {
