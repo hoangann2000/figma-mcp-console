@@ -261,12 +261,12 @@ func TestDisconnectFailsPending(t *testing.T) {
 // becomes the owner, the second joins as a peer, and both can call plugins.
 func TestRouterElection(t *testing.T) {
 	const port = 29471
-	r1 := NewRouter("proj-one", port)
+	r1 := NewRouter("proj-one", "test", port)
 	go r1.Run()
 	waitUntil(t, "r1 to own the bridge", func() bool { o, _ := r1.roles(); return o != nil })
 	owner, _ := r1.roles()
 
-	r2 := NewRouter("proj-two", port)
+	r2 := NewRouter("proj-two", "test", port)
 	go r2.Run()
 	waitUntil(t, "r2 to join as peer", func() bool { _, p := r2.roles(); return p != nil })
 

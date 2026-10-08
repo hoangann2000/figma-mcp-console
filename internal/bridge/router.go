@@ -19,11 +19,12 @@ type Router struct {
 	owner   *Bridge
 	peer    *Peer
 	project string
+	version string
 	port    int
 }
 
-func NewRouter(project string, port int) *Router {
-	return &Router{project: project, port: port}
+func NewRouter(project, version string, port int) *Router {
+	return &Router{project: project, version: version, port: port}
 }
 
 // Run blocks forever, holding whichever role the election gives this session
@@ -33,6 +34,7 @@ func (r *Router) Run() {
 	for {
 		b := New()
 		b.SetProject(r.project)
+		b.SetVersion(r.version)
 		if lns, err := b.listen(r.port); err == nil {
 			dialFailures = 0
 			log.Printf("bridge: this session owns the bridge on ws://localhost:%d", r.port)

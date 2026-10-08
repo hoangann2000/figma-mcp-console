@@ -62,7 +62,7 @@ func main() {
 	if cwd, err := os.Getwd(); err == nil {
 		project = filepath.Base(cwd)
 	}
-	r := bridge.NewRouter(project, *port)
+	r := bridge.NewRouter(project, version, *port)
 	go r.Run()
 
 	server := mcp.NewServer(&mcp.Implementation{
