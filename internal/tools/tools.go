@@ -878,6 +878,8 @@ func Register(s *mcp.Server, b *bridge.Router) {
 // larger than 4096x4096.
 const maxImageBytes = 20 << 20
 
+var imageClient = &http.Client{Timeout: 60 * time.Second}
+
 // loadImageBytes fetches an http(s) URL or reads a file inside the project.
 func loadImageBytes(ctx context.Context, source string) ([]byte, error) {
 	if strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") {
@@ -885,7 +887,7 @@ func loadImageBytes(ctx context.Context, source string) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("bad image URL: %w", err)
 		}
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := imageClient.Do(req)
 		if err != nil {
 			return nil, fmt.Errorf("fetch image: %w", err)
 		}
@@ -953,7 +955,7 @@ func resolveProjectPath(p string) (string, error) {
 	}
 	rel, err := filepath.Rel(root, dest)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("path %q escapes the project directory %s", p, root)
+		return "", fmt.Errorf("path %q escapes the project directory %s; pass a path inside it, e.g. assets/icons/arrow.svg", p, root)
 	}
 	return dest, nil
 }

@@ -326,7 +326,7 @@
         if (msg.hello.protocol && msg.hello.protocol !== PROTOCOL) {
           protoWarning =
             msg.hello.protocol < PROTOCOL
-              ? "⚠ Server outdated — update figma-mcp-console"
+              ? "⚠ Server outdated — restart your AI client"
               : "⚠ Plugin outdated — re-import from the latest release";
         }
         setStatus(true, label());

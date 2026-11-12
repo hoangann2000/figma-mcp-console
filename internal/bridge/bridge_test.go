@@ -305,3 +305,31 @@ func TestPeerRejectsBrowserOrigin(t *testing.T) {
 	}
 	c.CloseNow()
 }
+
+// Queue time is not the caller's time: a short call waiting behind a long one
+// must get its full timeout once the window is free.
+func TestQueueWaitIsOutsideTheCallTimeout(t *testing.T) {
+	b := New()
+	base := startBridge(t, b)
+	fakePlugin(t, b, base, "Shared File", func(req Request) *Response {
+		if req.Command == "slow" {
+			time.Sleep(300 * time.Millisecond)
+		}
+		return &Response{ID: req.ID, Result: json.RawMessage(`{}`)}
+	})
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if _, err := b.CallFile(context.Background(), "", "slow", nil, time.Second); err != nil {
+			t.Errorf("slow call: %v", err)
+		}
+	}()
+	waitUntil(t, "the slow call to take the window", func() bool { return b.inflight(1) > 0 })
+
+	// 150ms would expire while queued behind the 300ms call if waiting counted.
+	if _, err := b.CallFile(context.Background(), "", "quick", nil, 150*time.Millisecond); err != nil {
+		t.Fatalf("quick call behind a slow one: %v", err)
+	}
+	<-done
+}
