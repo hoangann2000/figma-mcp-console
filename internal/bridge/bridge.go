@@ -75,6 +75,7 @@ const ProtocolVersion = 2
 const (
 	pingInterval = 15 * time.Second
 	pingTimeout  = 10 * time.Second
+	busyGrace    = 60 * time.Second // how long a busy plugin may stay silent before it is pinged anyway
 )
 
 // maxMessageSize accommodates large base64 screenshot payloads; the
@@ -260,9 +261,6 @@ func (b *Bridge) handlePlugin(w http.ResponseWriter, r *http.Request) {
 	b.readPlugin(pc)
 }
 
-// pingLoop pings one plugin until ctx is cancelled (the read loop returned)
-// or a ping goes unanswered. An unanswered ping means the window is gone:
-// closing the socket unblocks readPlugin, which cleans up via dropPlugin.
 // inflight counts calls still waiting on one plugin.
 func (b *Bridge) inflight(connID uint64) int {
 	b.mu.Lock()
@@ -276,6 +274,9 @@ func (b *Bridge) inflight(connID uint64) int {
 	return n
 }
 
+// pingLoop pings one plugin until ctx is cancelled (the read loop returned)
+// or a ping goes unanswered. An unanswered ping means the window is gone:
+// closing the socket unblocks readPlugin, which cleans up via dropPlugin.
 func (b *Bridge) pingLoop(ctx context.Context, pc *pluginConn) {
 	t := time.NewTicker(pingInterval)
 	defer t.Stop()
@@ -292,7 +293,9 @@ func (b *Bridge) pingLoop(ctx context.Context, pc *pluginConn) {
 			if pc.quietFor() > 0 && pc.quietFor() < pingInterval {
 				continue
 			}
-			if b.inflight(pc.id) > 0 {
+			// Bounded, so a window that died mid-command is still noticed
+			// before a long call's own timeout.
+			if b.inflight(pc.id) > 0 && pc.quietFor() < busyGrace {
 				continue
 			}
 			pctx, cancel := context.WithTimeout(ctx, pingTimeout)
@@ -505,6 +508,12 @@ type peerResponse struct {
 // handlePeer serves one peer MCP session: every request is handled in its
 // own goroutine so a slow screenshot doesn't block the peer's other calls.
 func (b *Bridge) handlePeer(w http.ResponseWriter, r *http.Request) {
+	// Peers are our own Go sessions and send no Origin. A browser always does,
+	// so any web page could otherwise drive the open Figma file through here.
+	if r.Header.Get("Origin") != "" {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
 	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
 	if err != nil {
 		log.Printf("bridge: peer accept failed: %v", err)

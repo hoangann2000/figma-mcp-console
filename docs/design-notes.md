@@ -2,16 +2,6 @@
 
 Why some non-obvious parts of this server look the way they do. Written while building a design system with it: cloning 19 components to another page and giving each a wireframe variant.
 
-## Why `run_script` exists
-
-Atomic tools cost one call per node, and batching with `node_ids[]` only helps when every node gets the *same* value. Real jobs compute per node. Recolouring that cloned design system meant deriving each grey from the original colour's luminance: 197 fill writes and 85 stroke writes across 288 nodes. No combination of parameters expresses that.
-
-Measured on that job: **~25 calls with `run_script`, ~80+ without** — and without it the model must also pull all 288 nodes' fills into context to group them.
-
-Contrary to a common assumption, Figma's plugin sandbox **does** allow dynamic code (`new Function`). Scripts can `await`, and returning a live node is rejected rather than breaking the bridge.
-
-Prefer the atomic tools for single edits: their errors point at one node, while a failed script can leave the document half-changed.
-
 ## Why mutating tools are quiet
 
 They return `{ok, ids}`. A 50-node batch echoing a full node summary each buries whatever the caller was doing. `verbose: true` restores the summaries.
@@ -29,7 +19,6 @@ These cost real debugging time; the handlers now absorb them.
 - **The sandbox has no filesystem or network.** Anything touching either belongs in the Go server — see `download_assets`, `import_image`, `get_screenshot`.
 - **Instance children have derived ids** of the form `I<instance-id>;<source-child-id>`. Tools accept them.
 - **`clone()` escapes a SECTION.** Cloning a node whose parent is a section puts the copy on the page at 0,0, not beside the original, despite what the docs say about inheriting the parent. Pass an explicit parent and position.
-- **`figma` cannot be wrapped.** Its properties are non-configurable and non-writable, so a Proxy `get` trap may not return anything but the original value — returning even `fn.bind(figma)` makes every call throw `proxy: inconsistent get`. A plain object is no better: `for…in figma` yields no keys, so there is nothing to copy. This rules out observing calls from the outside, which is why a failed `run_script` cannot clean up after itself.
 - **`addComponentProperty` with `INSTANCE_SWAP`** wants the component's node id. Its published key is rejected with "Property value is incompatible with component property type".
 
 ## Why screenshots report their scale

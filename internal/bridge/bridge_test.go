@@ -286,3 +286,22 @@ func TestRouterElection(t *testing.T) {
 		t.Fatalf("peer Files: %v, %v", files, err)
 	}
 }
+
+// A web page must not reach /peer: browsers always send Origin, our peers never do.
+func TestPeerRejectsBrowserOrigin(t *testing.T) {
+	base := startBridge(t, New())
+	peerURL := "ws" + strings.TrimPrefix(base, "http") + "/peer"
+	ctx := context.Background()
+
+	h := http.Header{}
+	h.Set("Origin", "https://evil.example")
+	if c, _, err := websocket.Dial(ctx, peerURL, &websocket.DialOptions{HTTPHeader: h}); err == nil {
+		c.CloseNow()
+		t.Fatal("peer endpoint accepted a browser Origin")
+	}
+	c, _, err := websocket.Dial(ctx, peerURL, nil)
+	if err != nil {
+		t.Fatalf("peer without Origin rejected: %v", err)
+	}
+	c.CloseNow()
+}
