@@ -15,6 +15,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # A tag on broken code, or one that disagrees with the npm version, must not ship a plugin.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - run: go vet ./...
+      - run: go test -race ./...
+      - run: node --check plugin/code.js
+      - name: Tag must match npm/package.json
+        run: test "${GITHUB_REF_NAME}" = "v$(node -p "require('./npm/package.json').version")"
+
       - name: Package Figma plugin
         run: cd plugin && zip -r ../plugin.zip .
 
