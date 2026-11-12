@@ -16,3 +16,9 @@ jobs:
           go-version: stable
       - run: go vet ./...
       - run: go test -race ./...
+      # Figma is the only thing that runs the plugin, so catch syntax errors here.
+      - name: Check plugin JS syntax
+        run: |
+          node --check plugin/code.js
+          awk '/<script>/{f=1;next}/<\/script>/{f=0}f' plugin/ui.html > "$RUNNER_TEMP/ui.js"
+          node --check "$RUNNER_TEMP/ui.js"

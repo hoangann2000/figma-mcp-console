@@ -101,7 +101,41 @@ type pluginConn struct {
 	mu       sync.Mutex
 	info     FileInfo
 	lastRead time.Time
+	// turn serializes commands to this window. The plugin's onmessage is async
+	// and does not queue, so two sessions driving one file interleave at every
+	// await: one resolves node handles while the other deletes those nodes.
+	// Capacity 1 is a lock that still honours ctx.
+	turn    chan struct{}
+	waiting atomic.Int32
 }
+
+// maxQueueWait bounds how long a call waits for its turn, not how long it runs.
+const maxQueueWait = 5 * time.Minute
+
+// acquire takes this window's turn, or reports that the command never ran.
+func (pc *pluginConn) acquire(ctx context.Context, command string) error {
+	select {
+	case pc.turn <- struct{}{}:
+		return nil
+	default:
+	}
+	pc.waiting.Add(1)
+	defer pc.waiting.Add(-1)
+	t := time.NewTimer(maxQueueWait)
+	defer t.Stop()
+	select {
+	case pc.turn <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return fmt.Errorf("figma plugin %q stayed busy for %s, so %q never reached it and nothing was applied — "+
+			"safe to retry, but run fewer sessions against this file at once",
+			pc.label(), maxQueueWait, command)
+	}
+}
+
+func (pc *pluginConn) release() { <-pc.turn }
 
 func (pc *pluginConn) sawFrame() {
 	pc.mu.Lock()
@@ -237,7 +271,7 @@ func (b *Bridge) handlePlugin(w http.ResponseWriter, r *http.Request) {
 	}
 	c.SetReadLimit(maxMessageSize)
 
-	pc := &pluginConn{id: b.nextConn.Add(1), c: c}
+	pc := &pluginConn{id: b.nextConn.Add(1), c: c, turn: make(chan struct{}, 1)}
 	b.mu.Lock()
 	b.conns[pc.id] = pc
 	n := len(b.conns)
@@ -348,7 +382,8 @@ func (b *Bridge) dropPlugin(pc *pluginConn, err error) {
 	delete(b.conns, pc.id)
 	for id, p := range b.pending {
 		if p.connID == pc.id {
-			p.ch <- Response{ID: id, Error: "plugin disconnected"}
+			p.ch <- Response{ID: id, Error: fmt.Sprintf("figma plugin %q disconnected before answering, so the command may or may not have run; "+
+				"re-run Plugins → Development → Figma MCP Console in that file, then check the document before retrying", pc.label())}
 			delete(b.pending, id)
 		}
 	}
@@ -447,6 +482,14 @@ func (b *Bridge) CallFile(ctx context.Context, file, command string, params any,
 	if err != nil {
 		return nil, err
 	}
+	// Wait for the window outside the timeout: a 15s call must not die because
+	// another session is mid-screenshot.
+	if err := pc.acquire(ctx, command); err != nil {
+		return nil, err
+	}
+	// Released on timeout too: Figma cannot abort a running command, so holding
+	// the turn would lock the file for everyone until that command finishes.
+	defer pc.release()
 
 	id := fmt.Sprintf("%d", b.nextID.Add(1))
 	ch := make(chan Response, 1)
@@ -477,16 +520,15 @@ func (b *Bridge) CallFile(ctx context.Context, file, command string, params any,
 		return nil, ctx.Err()
 	case <-timer.C:
 		unregister()
-		// A plugin runs one command at a time on Figma's main thread, so with
-		// several sessions driving it a timeout usually means queueing rather
-		// than a hang. Say which it was, so the caller knows a retry helps.
-		inflight := b.inflight(pc.id)
-		if inflight > 0 {
-			return nil, fmt.Errorf("figma plugin %q did not answer %q within %s; %d other command(s) are still in flight to it, "+
-				"so it is busy rather than stuck — retry, or run fewer sessions against this file at once",
-				pc.label(), command, timeout, inflight)
+		// This call had the window to itself, so it is slow or stuck — and
+		// Figma cannot abort it, so a blind retry of a write duplicates it.
+		msg := fmt.Sprintf("figma plugin %q did not answer %q within %s; "+
+			"it may still be running in Figma, so re-read the document before retrying anything that writes",
+			pc.label(), command, timeout)
+		if w := pc.waiting.Load(); w > 0 {
+			msg += fmt.Sprintf(" (%d command(s) from other sessions are queued behind it)", w)
 		}
-		return nil, fmt.Errorf("figma plugin %q did not answer %q within %s", pc.label(), command, timeout)
+		return nil, errors.New(msg)
 	}
 }
 
