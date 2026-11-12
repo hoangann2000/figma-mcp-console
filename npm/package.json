@@ -2,7 +2,7 @@
   "name": "figma-mcp-console",
   "version": "0.5.4",
   "scripts": {
-    "prepublishOnly": "cp ../README.md ./README.md"
+    "prepublishOnly": "test -d bin/plugin && cd .. && go vet ./... && go test ./... && node --check plugin/code.js && cp README.md npm/README.md"
   },
   "description": "Figma MCP server for AI coding assistants — real-time read/write via a Figma Desktop plugin. No API token, no rate limits.",
   "bin": {
