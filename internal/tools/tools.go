@@ -24,10 +24,6 @@ import (
 // at a time.
 const screenshotTimeout = 150 * time.Second
 
-// scriptTimeout covers run_script, which exists to replace hundreds of calls
-// and so may legitimately churn through thousands of nodes.
-const scriptTimeout = 5 * time.Minute
-
 // maxScreenshotDimension is the largest max_dimension the plugin honours.
 const maxScreenshotDimension = 4096
 
@@ -92,7 +88,7 @@ type createShapeArgs struct {
 	Y         float64 `json:"y" jsonschema:"y position in the parent's coordinates"`
 	Width     float64 `json:"width" jsonschema:"width in pixels"`
 	Height    float64 `json:"height" jsonschema:"height in pixels"`
-	FillColor string  `json:"fill_color,omitempty" jsonschema:"solid fill as hex, e.g. #1E90FF, or \"none\" for no fill. Frames are transparent unless a color is given"`
+	FillColor string  `json:"fill_color,omitempty" jsonschema:"solid fill as hex, e.g. #1E90FF, or \"none\" for no fill (frames default to white)"`
 	ParentID  string  `json:"parent_id,omitempty" jsonschema:"node ID to append into (default: current page)"`
 }
 
@@ -175,12 +171,6 @@ type instancePropertiesArgs struct {
 	fileArg
 	InstanceID string         `json:"instance_id" jsonschema:"INSTANCE node to update"`
 	Properties map[string]any `json:"properties" jsonschema:"property name to value. Variant properties use the plain name (Size), TEXT/BOOLEAN/INSTANCE_SWAP use the full key returned by add_component_property (Label#12:3)"`
-}
-
-type runScriptArgs struct {
-	fileArg
-	Token string `json:"token,omitempty" jsonschema:"an id you choose for this run, e.g. \"build-cards-1\". A script that times out or loses the connection keeps running in Figma, so resending the same token returns that run\\'s result instead of doing the work twice. The memory lives in the plugin window and the last 20 runs, so it is lost if the plugin is reloaded. Always set it for scripts that create nodes"`
-	Code  string `json:"code" jsonschema:"JavaScript body executed in the Figma plugin sandbox. figma is in scope, await is allowed, and the value you return becomes the tool result. Return plain data only (ids, numbers, strings, arrays), never Figma node objects"`
 }
 
 type groupArgs struct {
@@ -703,54 +693,6 @@ func Register(s *mcp.Server, b *bridge.Router) {
 		"Mark a frame as a prototype flow's starting point on its page, or remove it again with remove: true. "+
 			"Returns the page's full list of starting points.",
 		bridge.DefaultTimeout)
-	// run_script is registered by hand: a timed-out script keeps running in
-	// Figma, so the timeout needs to say that rather than invite a retry.
-	mcp.AddTool(s, &mcp.Tool{Name: "run_script", Description: "Run a JavaScript body against the Figma Plugin API in one call — the escape hatch for bulk work that would otherwise cost " +
-		"hundreds of atomic calls, such as binding a variable to every white fill in a subtree. " +
-		"figma is in scope, await is allowed, and the returned value (plain data only) becomes the result; return nothing and you get a count of what was created. " +
-		"This is the real Figma Plugin API, not another tool's sandbox: there is no node.query(), node.set() or node.screenshot(), " +
-		"and createAutoLayout(direction, props) exists only as helpers.createAutoLayout. " +
-		"The file is opened with dynamic-page access, so the sync accessors throw — use setFillStyleIdAsync, setStrokeStyleIdAsync, " +
-		"setTextStyleIdAsync, setEffectStyleIdAsync, getMainComponentAsync, getNodeByIdAsync and loadAllPagesAsync. " +
-		"On failure the error names the script line, and whatever the script already created stays in the document. " +
-		"Nothing can abort a running script, so a call that times out keeps going and keeps writing — including any cleanup in its own catch block, " +
-		"which can delete work done after the timeout. Set a token so a retry joins the original run; without one, wait for the plugin to go idle and " +
-		"inspect the document rather than redoing the work. " +
-		"Nothing persists between scripts, and globalThis does not survive a plugin reload, so define any helpers inside each script. " +
-		"A bound paint still carries its own colour, which is what renders wherever the variable cannot resolve, so seed it from " +
-		"variable.resolveForConsumer(node).value rather than black. " +
-		"Look nodes up by id rather than running findAll over a whole section: one findAll across ~130 large frames timed out at five minutes, " +
-		"while the same work done per node took seconds. " +
-		"Prefer the atomic tools for single edits: they give precise errors, while a failed script can leave the document half-changed."},
-		func(ctx context.Context, req *mcp.CallToolRequest, args runScriptArgs) (*mcp.CallToolResult, any, error) {
-			raw, err := b.Call(ctx, args.File, "run_script", args, scriptTimeout)
-			if err != nil {
-				// Both a timeout and a lost connection leave the script running
-				// in Figma, so the work may already be done. Saying so is the
-				// difference between a safe retry and duplicated work.
-				msg := err.Error()
-				timedOut := strings.Contains(msg, "did not answer")
-				dropped := strings.Contains(msg, "disconnected")
-				if timedOut || dropped {
-					hint := "; Figma cannot abort a running script, so this one is still running and can keep changing the document — " +
-						"including the cleanup in its own catch block, which may delete work you do in the meantime. " +
-						"Do not redo its work or edit the same nodes until the plugin is idle"
-					switch {
-					case args.Token == "":
-						hint += ". Pass a token next time: resending it returns the original run's result instead of repeating its work"
-					case dropped:
-						hint += ". Resending the token joins that run, but only while the plugin stays open — a reloaded plugin forgets, so verify the document first"
-					default:
-						hint += ". Resend the same token to join that run instead of repeating its work"
-					}
-					return nil, nil, fmt.Errorf("%w%s", err, hint)
-				}
-				return nil, nil, err
-			}
-			return &mcp.CallToolResult{
-				Content: []mcp.Content{&mcp.TextContent{Text: string(raw)}},
-			}, nil, nil
-		})
 
 	// get_screenshot returns an image, so it can't use registerBridged.
 	mcp.AddTool(s, &mcp.Tool{

@@ -3,7 +3,10 @@ package tools
 import (
 	"os"
 	"regexp"
+	"strconv"
 	"testing"
+
+	"github.com/hoangann2000/figma-mcp-console/internal/bridge"
 )
 
 // Every bridged tool is dispatched to a plugin handler of the same name, so a
@@ -37,5 +40,21 @@ func TestEveryBridgedToolHasAPluginHandler(t *testing.T) {
 		if name := string(m[1]); !handlers[name] {
 			t.Errorf("tool %q has no matching handler in plugin/code.js", name)
 		}
+	}
+}
+
+// The plugin compares its PROTOCOL with the server's on connect; bumping one
+// side only makes every user see an "outdated" warning.
+func TestPluginProtocolMatchesServer(t *testing.T) {
+	ui, err := os.ReadFile("../../plugin/ui.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile(`PROTOCOL = (\d+);`).FindSubmatch(ui)
+	if m == nil {
+		t.Fatal("found no PROTOCOL constant in plugin/ui.html — the regex is stale")
+	}
+	if got, _ := strconv.Atoi(string(m[1])); got != bridge.ProtocolVersion {
+		t.Errorf("plugin PROTOCOL = %d, bridge.ProtocolVersion = %d", got, bridge.ProtocolVersion)
 	}
 }

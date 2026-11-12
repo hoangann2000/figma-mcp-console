@@ -33,10 +33,14 @@ async function resolvePage(ref) {
   const want = String(ref);
   const lower = want.toLowerCase();
   const pages = figma.root.children;
-  const p =
-    pages.find((x) => x.id === want) ||
-    pages.find((x) => x.name.toLowerCase() === lower) ||
-    pages.find((x) => x.name.toLowerCase().indexOf(lower) !== -1);
+  let p = pages.find((x) => x.id === want) || pages.find((x) => x.name.toLowerCase() === lower);
+  if (!p) {
+    const partial = pages.filter((x) => x.name.toLowerCase().indexOf(lower) !== -1);
+    if (partial.length > 1) {
+      throw new Error("page " + ref + " is ambiguous: " + partial.map((x) => x.name).join(", "));
+    }
+    p = partial[0];
+  }
   if (!p) throw new Error("page not found: " + ref + " (see list_pages)");
   await p.loadAsync();
   return p;
@@ -268,45 +272,6 @@ function applyShapeParams(n, params) {
   }
 }
 
-// Tracking the nodes a script creates needs a wrapper around figma, but the
-// host object's properties are non-configurable and non-writable, so a Proxy
-// get trap that returns anything else (even a bound copy) breaks the Proxy
-// invariant and every call throws "proxy: inconsistent get". Scripts get the
-// real figma until there is a wrapper that survives that.
-
-// Frames from the script read "at <anonymous> (<input>:6:22)". new Function
-// prepends two header lines and we add the async wrapper, so the caller's
-// line 1 is file line 4. Verified against the sandbox; a different engine
-// would only cost us the hint, since no match means no line is reported.
-function scriptLine(e) {
-  const m = /<input>:(\d+):\d+/.exec((e && e.stack) || "");
-  if (!m) return 0;
-  const n = parseInt(m[1], 10) - 3;
-  return n > 0 ? n : 0;
-}
-
-function scriptFailure(e) {
-  let msg = String((e && e.message) || e);
-  // Plan limits read like API errors; say what they actually mean.
-  if (/Limited to \d+ mode/i.test(msg)) {
-    msg += " (Figma plan limit on modes per collection — split the tokens across separate collections)";
-  }
-  const line = scriptLine(e);
-  if (line) msg += " [script line " + line + "]";
-  return msg;
-}
-
-// A run_script that times out on the server keeps running here: Figma gives
-// no way to abort it. Keyed by token, a retry joins the original run instead
-// of doing its work a second time.
-const scriptRuns = new Map();
-const SCRIPT_MEMO = 20;
-
-function rememberRun(token, promise) {
-  scriptRuns.set(token, promise);
-  while (scriptRuns.size > SCRIPT_MEMO) scriptRuns.delete(scriptRuns.keys().next().value);
-}
-
 // Optional extras find_nodes can attach per node, so callers can filter on
 // style without a get_design_context round-trip per hit.
 const FIELD_GETTERS = {
@@ -319,49 +284,6 @@ const FIELD_GETTERS = {
   opacity: (n) => ("opacity" in n ? n.opacity : undefined),
   characters: (n) => (n.type === "TEXT" ? n.characters : undefined),
 };
-
-// The body of run_script, split out so a token can hold onto its promise.
-async function runScriptBody(params) {
-  const helpers = {
-    node, summarize, serialize, hexToRGB, rgbToHex, paintBrief, solidFillHex,
-    // The Plugin API has no createAutoLayout; scripts written against other
-    // Figma tooling reach for it and fail on "not a function".
-    createAutoLayout(direction, props) {
-      const f = figma.createFrame();
-      f.layoutMode = String(direction || "VERTICAL").toUpperCase() === "HORIZONTAL" ? "HORIZONTAL" : "VERTICAL";
-      f.primaryAxisSizingMode = "AUTO";
-      f.counterAxisSizingMode = "AUTO";
-      f.fills = [];
-      if (props) for (const k in props) f[k] = props[k];
-      return f;
-    },
-  };
-
-  let fn;
-  try {
-    fn = new Function("figma", "helpers", '"use strict"; return (async () => {\n' + params.code + "\n})();");
-  } catch (e) {
-    throw new Error(
-      "the Figma plugin sandbox rejected dynamic code (" + String((e && e.message) || e) +
-      "); use the atomic tools instead",
-    );
-  }
-
-  let result;
-  try {
-    result = await fn(figma, helpers);
-  } catch (e) {
-    throw new Error(scriptFailure(e));
-  }
-  if (result === undefined) return { ok: true };
-  // The reply is structured-cloned to the UI; a live node would kill the
-  // connection, so force plain data here and fail with a clear message.
-  try {
-    return JSON.parse(JSON.stringify(result));
-  } catch (e) {
-    throw new Error("script must return plain data (ids, numbers, strings, arrays), not Figma objects");
-  }
-}
 
 // ---------- prototyping ----------
 
@@ -478,9 +400,8 @@ const handlers = {
 
   async create_frame(params) {
     const f = figma.createFrame();
-    // Figma gives new frames an opaque white fill, which silently covers
-    // whatever sits behind a nested frame. Transparent unless asked.
-    if (!params.fill_color || params.fill_color === "none") f.fills = [];
+    // Figma's default white fill stays unless the caller opts out.
+    if (params.fill_color === "none") f.fills = [];
     applyShapeParams(f, params);
     (await parentOf(params)).appendChild(f);
     return summarize(f);
@@ -946,7 +867,8 @@ const handlers = {
   },
 
   async combine_as_variants(params) {
-    const nodes = await Promise.all(params.node_ids.map(node));
+    if (!params.node_ids || !params.node_ids.length) throw new Error("node_ids is required");
+    const nodes = await Promise.all(params.node_ids.map((id) => node(id)));
     for (const n of nodes) {
       if (n.type !== "COMPONENT") throw new Error("node " + n.id + " is " + n.type + ", not a COMPONENT");
     }
@@ -970,9 +892,9 @@ const handlers = {
     // rather than failing a call that only omitted it.
     let def = params.default_value;
     if (def === undefined || def === null) def = type === "BOOLEAN" ? false : "";
+    const t = params.bind_node_id ? await node(params.bind_node_id) : null;
     const key = c.addComponentProperty(params.name, type, def);
-    if (params.bind_node_id) {
-      const t = await node(params.bind_node_id);
+    if (t) {
       const field = type === "TEXT" ? "characters" : type === "BOOLEAN" ? "visible" : "mainComponent";
       const refs = {};
       for (const k in t.componentPropertyReferences || {}) refs[k] = t.componentPropertyReferences[k];
@@ -1243,18 +1165,6 @@ const handlers = {
       changed,
       flowStartingPoints: page.flowStartingPoints.map((p) => ({ nodeId: p.nodeId, name: p.name })),
     };
-  },
-
-  // Escape hatch for bulk work: one call instead of hundreds of atomic ones.
-  // Figma's plugin sandbox may refuse dynamic code entirely; when it does, say
-  // so plainly rather than failing with a bare ReferenceError.
-  async run_script(params) {
-    if (typeof params.code !== "string" || !params.code.trim()) throw new Error("code is required");
-    const token = typeof params.token === "string" && params.token ? params.token : null;
-    if (token && scriptRuns.has(token)) return scriptRuns.get(token);
-    const run = runScriptBody(params);
-    if (token) rememberRun(token, run);
-    return run;
   },
 
   async get_screenshot(params) {
