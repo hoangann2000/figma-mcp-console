@@ -66,7 +66,7 @@ type pluginFrame struct {
 // server is diagnosed up front instead of failing later with a cryptic
 // "unknown command". Bump it on any breaking change to the command set or
 // message shape the plugin must understand.
-const ProtocolVersion = 1
+const ProtocolVersion = 2
 
 // Keepalive tuning for plugin connections. A dead Figma window (asleep,
 // crashed tab, sleeping machine) may never send a TCP FIN, so the owner
@@ -94,11 +94,27 @@ const cmdListFiles = "_list_files"
 
 // pluginConn is one attached plugin window.
 type pluginConn struct {
-	id      uint64
-	c       *websocket.Conn
-	writeMu sync.Mutex
-	mu      sync.Mutex
-	info    FileInfo
+	id       uint64
+	c        *websocket.Conn
+	writeMu  sync.Mutex
+	mu       sync.Mutex
+	info     FileInfo
+	lastRead time.Time
+}
+
+func (pc *pluginConn) sawFrame() {
+	pc.mu.Lock()
+	pc.lastRead = time.Now()
+	pc.mu.Unlock()
+}
+
+func (pc *pluginConn) quietFor() time.Duration {
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+	if pc.lastRead.IsZero() {
+		return 0
+	}
+	return time.Since(pc.lastRead)
 }
 
 func (pc *pluginConn) file() FileInfo {
@@ -135,6 +151,7 @@ type Bridge struct {
 	nextConn atomic.Uint64
 	nextID   atomic.Uint64
 	project  string
+	version  string
 	port     int
 }
 
@@ -148,6 +165,10 @@ func New() *Bridge {
 // SetProject names the project of the owning session; it is shown in the
 // plugin UI status line.
 func (b *Bridge) SetProject(name string) { b.project = name }
+
+// SetVersion names the server build; the plugin shows it so a stale binary
+// is visible without digging through logs.
+func (b *Bridge) SetVersion(v string) { b.version = v }
 
 // listen binds the bridge port on loopback. Both IPv4 (127.0.0.1) and IPv6
 // (::1) are bound: the plugin connects to ws://localhost, and on macOS
@@ -226,7 +247,7 @@ func (b *Bridge) handlePlugin(w http.ResponseWriter, r *http.Request) {
 	// status line; the plugin answers with a register frame naming its file.
 	// protocol lets the plugin flag itself as outdated against a newer server.
 	_ = pc.write(context.Background(), map[string]any{
-		"hello": map[string]any{"project": b.project, "port": b.port, "protocol": ProtocolVersion},
+		"hello": map[string]any{"project": b.project, "port": b.port, "protocol": ProtocolVersion, "version": b.version},
 	})
 
 	// Keepalive runs alongside the read loop and stops when it returns (the
@@ -242,6 +263,19 @@ func (b *Bridge) handlePlugin(w http.ResponseWriter, r *http.Request) {
 // pingLoop pings one plugin until ctx is cancelled (the read loop returned)
 // or a ping goes unanswered. An unanswered ping means the window is gone:
 // closing the socket unblocks readPlugin, which cleans up via dropPlugin.
+// inflight counts calls still waiting on one plugin.
+func (b *Bridge) inflight(connID uint64) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	n := 0
+	for _, p := range b.pending {
+		if p.connID == connID {
+			n++
+		}
+	}
+	return n
+}
+
 func (b *Bridge) pingLoop(ctx context.Context, pc *pluginConn) {
 	t := time.NewTicker(pingInterval)
 	defer t.Stop()
@@ -250,6 +284,17 @@ func (b *Bridge) pingLoop(ctx context.Context, pc *pluginConn) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			// A pong is read by the same loop that reads replies, so it queues
+			// behind a multi-megabyte screenshot and can miss its deadline on a
+			// perfectly healthy window. Skip the ping when the plugin has just
+			// sent something, or is still working on a command: the per-call
+			// timeout covers a window that really died mid-command.
+			if pc.quietFor() > 0 && pc.quietFor() < pingInterval {
+				continue
+			}
+			if b.inflight(pc.id) > 0 {
+				continue
+			}
 			pctx, cancel := context.WithTimeout(ctx, pingTimeout)
 			err := pc.c.Ping(pctx)
 			cancel()
@@ -274,6 +319,7 @@ func (b *Bridge) readPlugin(pc *pluginConn) {
 			b.dropPlugin(pc, err)
 			return
 		}
+		pc.sawFrame()
 		if f.Register != nil {
 			pc.mu.Lock()
 			pc.info = *f.Register
@@ -428,6 +474,15 @@ func (b *Bridge) CallFile(ctx context.Context, file, command string, params any,
 		return nil, ctx.Err()
 	case <-timer.C:
 		unregister()
+		// A plugin runs one command at a time on Figma's main thread, so with
+		// several sessions driving it a timeout usually means queueing rather
+		// than a hang. Say which it was, so the caller knows a retry helps.
+		inflight := b.inflight(pc.id)
+		if inflight > 0 {
+			return nil, fmt.Errorf("figma plugin %q did not answer %q within %s; %d other command(s) are still in flight to it, "+
+				"so it is busy rather than stuck — retry, or run fewer sessions against this file at once",
+				pc.label(), command, timeout, inflight)
+		}
 		return nil, fmt.Errorf("figma plugin %q did not answer %q within %s", pc.label(), command, timeout)
 	}
 }

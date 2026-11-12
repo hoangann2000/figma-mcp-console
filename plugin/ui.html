@@ -15,7 +15,7 @@
       "Segoe UI",
       sans-serif;
     margin: 0;
-    padding: 14px;
+    padding: 10px;
     color: #2c2c34;
     background: linear-gradient(160deg, #f6f7fb 0%, #eef0f7 100%);
     display: flex;
@@ -25,8 +25,8 @@
   .card {
     background: #fff;
     border: 1px solid #e6e8f0;
-    border-radius: 10px;
-    padding: 9px 11px;
+    border-radius: 9px;
+    padding: 7px 9px;
     box-shadow: 0 1px 2px rgba(30, 34, 60, 0.04);
   }
 
@@ -59,9 +59,9 @@
 
   #hint {
     color: #6b6f7d;
-    margin-top: 8px;
-    font-size: 11px;
-    line-height: 1.45;
+    margin-top: 5px;
+    font-size: 10px;
+    line-height: 1.35;
   }
 
   #result {
@@ -228,10 +228,15 @@
 
   #credit {
     margin-top: auto;
-    padding-top: 10px;
+    padding-top: 7px;
     text-align: center;
     color: #a0a4b0;
     font-size: 10px;
+  }
+
+  #version {
+    color: #8288a0;
+    margin-right: 4px;
   }
 
   #credit a {
@@ -248,13 +253,11 @@
   <div id="status-row">
     <span id="dot"></span><span id="status">Connecting…</span>
   </div>
-  <div id="hint">
-    Keep this window open while AI works. Open the plugin in each file you want
-    it to edit.
-  </div>
+  <div id="hint">Keep open while AI works · run it in every file.</div>
   <div id="result"></div>
 </div>
 <div id="credit">
+  <span id="version"></span>
   <a href="https://github.com/hoangann2000/figma-mcp-console" target="_blank">@hoangann2000</a>
   <a href="https://github.com/fuvavi" target="_blank">@fuvavi</a>
 </div>
@@ -270,7 +273,7 @@
   // the status line also trigger an immediate attempt.
   const PORT = 2000,
     RETRY = 1000,
-    PROTOCOL = 1; // must match bridge.ProtocolVersion in the Go server
+    PROTOCOL = 2; // must match bridge.ProtocolVersion in the Go server
   let ws = null; // open connection, null while disconnected
   let attempt = null; // socket currently trying to connect
   let reg = null; // {key, name} of this file, sent by the main thread
@@ -311,10 +314,21 @@
     sock.onmessage = (e) => {
       const msg = JSON.parse(e.data);
       if (msg.hello) {
-        protoWarning =
-          msg.hello.protocol && msg.hello.protocol !== PROTOCOL
-            ? "⚠ Plugin outdated — re-import from the latest release"
-            : null;
+        // Name the side that is behind: a stale server is just as common as
+        // a stale plugin, and blaming the plugin sends people re-importing
+        // a plugin that was already up to date.
+        // Show which server build we are talking to; "dev" means a local
+        // go build rather than a release.
+        if (msg.hello.version) {
+          document.getElementById("version").textContent = "v" + msg.hello.version;
+        }
+        protoWarning = null;
+        if (msg.hello.protocol && msg.hello.protocol !== PROTOCOL) {
+          protoWarning =
+            msg.hello.protocol < PROTOCOL
+              ? "⚠ Server outdated — update figma-mcp-console"
+              : "⚠ Plugin outdated — re-import from the latest release";
+        }
         setStatus(true, label());
         return;
       }

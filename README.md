@@ -244,6 +244,10 @@ Exports follow the file extension the AI picks (`.svg` for vector, `.png`/`.jpg`
 | 📁 Exported files end up in the wrong folder | Exports are written relative to where the server runs. Register it in the project-level config, or tell the AI an explicit export path |
 | 🔤 Font errors when creating text | The Figma file uses a font not installed on your machine — the error message names it |
 
+## 🛠 Contributing
+
+Setup, how to add a tool, and the gotchas that cost time: **[CONTRIBUTING.md](CONTRIBUTING.md)**. Why the non-obvious parts work the way they do: **[docs/design-notes.md](docs/design-notes.md)**.
+
 ## 📄 License
 
 [MIT](https://github.com/hoangann2000/figma-mcp-console/blob/main/LICENSE) — © [Hoang Le Thien An](https://github.com/hoangann2000)
