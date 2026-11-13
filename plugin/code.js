@@ -6,8 +6,8 @@ figma.showUI(__html__, { width: 280, height: 104 });
 
 // Tell the UI which file this plugin window runs in; the UI forwards it to
 // the bridge on every (re)connect so calls can be routed per file when
-// several files run the plugin at once. figma.fileKey is undefined for
-// non-published dev plugins, so the file name is the primary identifier.
+// several files run the plugin at once. figma.fileKey needs
+// enablePrivatePluginApi in the manifest, so the file name stays the fallback.
 figma.ui.postMessage({
   register: { key: figma.fileKey || undefined, name: figma.root.name },
 });
@@ -122,22 +122,9 @@ function summarize(n) {
   return s;
 }
 
-// The file key needed to build share links. Published plugins can read it from
-// figma.fileKey, but development plugins (imported from a manifest) cannot, so
-// we fall back to a key the user pastes once — their file URL — persisted in
-// the file via pluginData so it survives reopening.
-const FILE_KEY_DATA = "figma-mcp-file-key";
-let fileKey = figma.fileKey || "";
-try {
-  if (!fileKey) fileKey = figma.root.getPluginData(FILE_KEY_DATA) || "";
-} catch (e) {}
-
-function setFileKey(key) {
-  fileKey = key || "";
-  try {
-    figma.root.setPluginData(FILE_KEY_DATA, fileKey);
-  } catch (e) {}
-}
+// The file key needed to build share links. Development plugins only get
+// figma.fileKey because the manifest sets enablePrivatePluginApi.
+const fileKey = figma.fileKey || "";
 
 // nodeLink builds a shareable figma.com URL that jumps straight to a node (the
 // same link as Figma's "Copy link to selection"). Returns null when no file
@@ -1230,15 +1217,11 @@ async function postSelection() {
     }
     items.push(item);
   }
-  const needsKey = !fileKey && items.some((it) => it.type === "FRAME");
-  figma.ui.postMessage({ selection: items, hasKey: !!fileKey });
-  // Room for: base card + filter bar (30) + optional Copy-all header (22) +
-  // the paste-URL prompt when a frame needs a key (64) + up to 6 visible rows
+  figma.ui.postMessage({ selection: items });
+  // Room for: base card + optional Copy-all header (22) + up to 6 visible rows
   // (the list scrolls beyond that).
   const rows = Math.min(items.length, 6);
-  const h = items.length
-    ? 134 + (items.length > 1 ? 22 : 0) + (needsKey ? 64 : 0) + rows * 30
-    : 104;
+  const h = 104 + (items.length > 1 ? 22 : 0) + rows * 30;
   figma.ui.resize(280, h);
 }
 figma.on("selectionchange", postSelection);
@@ -1248,12 +1231,6 @@ postSelection();
 
 figma.ui.onmessage = async (msg) => {
   if (!msg) return;
-  // Control message from the UI: the user pasted the file URL to enable links.
-  if (typeof msg.setFileKey === "string") {
-    setFileKey(msg.setFileKey);
-    postSelection();
-    return;
-  }
   if (!msg.id || !msg.command) return;
   const h = handlers[msg.command];
   try {

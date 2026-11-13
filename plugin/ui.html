@@ -150,82 +150,6 @@
     font-size: 10px;
   }
 
-  .filter-row {
-    display: flex;
-    gap: 4px;
-    margin-bottom: 8px;
-  }
-
-  .filter-btn {
-    flex: none;
-    border: 1px solid #d6d9e6;
-    background: #fff;
-    color: #6b6f7d;
-    border-radius: 6px;
-    padding: 3px 9px;
-    font-size: 10px;
-    cursor: pointer;
-  }
-
-  .filter-btn:hover {
-    background: #f0f2f8;
-  }
-
-  .filter-btn.on {
-    background: #2c2c34;
-    border-color: #2c2c34;
-    color: #fff;
-  }
-
-  .res-empty {
-    font-size: 11px;
-    color: #a0a4b0;
-    padding: 6px 2px;
-  }
-
-  .key-prompt {
-    margin-bottom: 8px;
-    padding: 7px 8px;
-    border: 1px solid #ffe0a6;
-    background: #fff9ec;
-    border-radius: 7px;
-  }
-
-  .key-note {
-    font-size: 10px;
-    color: #8a6d3b;
-    line-height: 1.4;
-    margin-bottom: 5px;
-  }
-
-  .key-input-row {
-    display: flex;
-    gap: 4px;
-  }
-
-  .key-input {
-    flex: 1;
-    min-width: 0;
-    border: 1px solid #d6d9e6;
-    border-radius: 6px;
-    padding: 3px 6px;
-    font-size: 10px;
-  }
-
-  .key-save {
-    flex: none;
-    border: 1px solid #d6d9e6;
-    background: #fff;
-    border-radius: 6px;
-    padding: 3px 10px;
-    font-size: 10px;
-    cursor: pointer;
-  }
-
-  .key-save:hover {
-    background: #f0f2f8;
-  }
-
   #credit {
     margin-top: auto;
     padding-top: 7px;
@@ -359,28 +283,8 @@
     }, RETRY);
   }
 
-  // ---- live selection list (name + copyable link, filterable by type) ----
+  // ---- live selection list (name + copyable link) ----
   let selItems = []; // everything currently selected in Figma
-  let shownItems = []; // selItems after the active type filter
-  let selFilter = "all"; // all | frame | vector
-  let hasKey = false; // whether the main thread knows this file's key
-
-  // Pull the file key out of a pasted Figma URL (…/design/<key>/…), or accept
-  // a bare key. Returns "" when nothing usable is found.
-  function parseFileKey(s) {
-    s = (s || "").trim();
-    const m = s.match(/figma\.com\/(?:file|design|board|proto)\/([A-Za-z0-9]+)/i);
-    if (m) return m[1];
-    if (/^[A-Za-z0-9]{10,}$/.test(s)) return s;
-    return "";
-  }
-
-  const FILTERS = [
-    { key: "all", label: "All" },
-    { key: "frame", label: "Frame" },
-    { key: "vector", label: "Vector" },
-    { key: "instance", label: "Instance" },
-  ];
 
   function esc(s) {
     return String(s)
@@ -388,13 +292,6 @@
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;");
-  }
-
-  function matches(it) {
-    if (selFilter === "frame") return it.type === "FRAME";
-    if (selFilter === "vector") return it.type === "VECTOR";
-    if (selFilter === "instance") return it.type === "INSTANCE";
-    return true;
   }
 
   // Frames copy as a link block; every other element copies its exported SVG.
@@ -424,38 +321,14 @@
       box.innerHTML = "";
       return;
     }
-    shownItems = selItems.filter(matches);
-
-    // Only frames need a link (and therefore the file key); a pure vector /
-    // instance selection copies SVG, so don't nag for a URL then.
-    const needsKey = !hasKey && selItems.some((it) => it.type === "FRAME");
-    const keyPrompt = !needsKey
-      ? ""
-      : '<div class="key-prompt">' +
-      '<div class="key-note">Links are empty: this file has no key yet. Paste the file URL once ' +
-      "(Share → Copy link, or the browser address bar):</div>" +
-      '<div class="key-input-row">' +
-      '<input class="key-input" id="key-input" placeholder="https://www.figma.com/design/…" />' +
-      '<button class="key-save" id="key-save">Save</button>' +
-      "</div></div>";
-
-    const filterBar =
-      '<div class="filter-row">' +
-      FILTERS.map(
-        (f) =>
-          '<button class="filter-btn' + (selFilter === f.key ? " on" : "") + '" data-f="' + f.key + '">' +
-          f.label + "</button>",
-      ).join("") +
-      "</div>";
-
     const head =
-      '<div class="res-head"><span class="res-title">Selected (' + shownItems.length + ")</span>" +
-      (shownItems.length > 1 ? '<button class="copy-btn copy-all" data-all="1">Copy all</button>' : "") +
+      '<div class="res-head"><span class="res-title">Selected (' + selItems.length + ")</span>" +
+      (selItems.length > 1 ? '<button class="copy-btn copy-all" data-all="1">Copy all</button>' : "") +
       "</div>";
 
-    const body = shownItems.length
-      ? '<div class="res-list">' +
-      shownItems
+    const body =
+      '<div class="res-list">' +
+      selItems
         .map(
           (it, i) =>
             '<div class="res-row">' +
@@ -465,21 +338,19 @@
             "</div>",
         )
         .join("") +
-      "</div>"
-      : '<div class="res-empty">No matching nodes selected.</div>';
+      "</div>";
 
-    box.innerHTML = keyPrompt + filterBar + head + body;
+    box.innerHTML = head + body;
     box.className = "show";
   }
 
   // What each button copies: a row copies its own value (link block for a
-  // frame, SVG otherwise); "Copy all" joins every shown item with a blank
-  // line between — filter to one type first for a homogeneous result.
+  // frame, SVG otherwise); "Copy all" joins every item with a blank line between.
   function copyValueFor(btn) {
     if (btn.hasAttribute("data-all")) {
-      return shownItems.map(copyValueForItem).join("\n\n");
+      return selItems.map(copyValueForItem).join("\n\n");
     }
-    const it = shownItems[+btn.getAttribute("data-i")];
+    const it = selItems[+btn.getAttribute("data-i")];
     return it ? copyValueForItem(it) : "";
   }
 
@@ -499,23 +370,6 @@
   }
 
   document.getElementById("result").addEventListener("click", (e) => {
-    if (e.target.id === "key-save") {
-      const inp = document.getElementById("key-input");
-      const key = parseFileKey(inp ? inp.value : "");
-      if (key) {
-        parent.postMessage({ pluginMessage: { setFileKey: key } }, "*");
-      } else if (inp) {
-        inp.value = "";
-        inp.placeholder = "Couldn't read a file key from that — paste the full URL";
-      }
-      return;
-    }
-    const fb = e.target.closest(".filter-btn");
-    if (fb) {
-      selFilter = fb.getAttribute("data-f");
-      drawSelection();
-      return;
-    }
     const btn = e.target.closest(".copy-btn");
     if (!btn) return;
     copyText(copyValueFor(btn));
@@ -541,7 +395,6 @@
       return;
     }
     if (Array.isArray(msg.selection)) {
-      hasKey = !!msg.hasKey;
       renderSelection(msg.selection);
       return;
     }
