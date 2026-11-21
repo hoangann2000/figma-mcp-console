@@ -10,16 +10,8 @@ import (
 
 // varDefs is what the plugin's get_variable_defs returns.
 type varDefs struct {
-	Collections []struct {
-		ID            string `json:"id"`
-		Name          string `json:"name"`
-		DefaultModeID string `json:"defaultModeId"`
-		Modes         []struct {
-			ModeID string `json:"modeId"`
-			Name   string `json:"name"`
-		} `json:"modes"`
-	} `json:"collections"`
-	Variables []struct {
+	Collections []varCollection `json:"collections"`
+	Variables   []struct {
 		ID           string                     `json:"id"`
 		Name         string                     `json:"name"`
 		ResolvedType string                     `json:"resolvedType"`

@@ -58,8 +58,8 @@ func TestEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list tools: %v", err)
 	}
-	if n := len(tools.Tools); n != 59 {
-		t.Errorf("want 59 tools, got %d", n)
+	if n := len(tools.Tools); n != 62 {
+		t.Errorf("want 62 tools, got %d", n)
 	}
 
 	prompts, err := session.ListPrompts(ctx, nil)

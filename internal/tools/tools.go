@@ -295,15 +295,36 @@ type createLineArgs struct {
 
 type importImageArgs struct {
 	fileArg
-	Source    string  `json:"source" jsonschema:"image to import: an http(s) URL or a file path relative to the project directory"`
-	NodeID    string  `json:"node_id,omitempty" jsonschema:"existing node to apply the image to as a fill; omit to create a new rectangle"`
+	Source    string  `json:"source" jsonschema:"image to import: an http(s) URL or a file path relative to the project directory. PNG, JPG and GIF become an image fill; SVG becomes editable vector layers"`
+	NodeID    string  `json:"node_id,omitempty" jsonschema:"existing node to apply a PNG/JPG/GIF to as a fill; omit to create a new rectangle. Not for SVG, which becomes layers (use parent_id)"`
+	Color     string  `json:"color,omitempty" jsonschema:"SVG only: recolor every solid fill and stroke to this hex, e.g. #111827, the usual way to tint an icon"`
 	X         float64 `json:"x,omitempty" jsonschema:"x position for the new rectangle"`
 	Y         float64 `json:"y,omitempty" jsonschema:"y position for the new rectangle"`
-	Width     float64 `json:"width,omitempty" jsonschema:"width for the new rectangle (default: the image's natural size)"`
+	Width     float64 `json:"width,omitempty" jsonschema:"width for the new rectangle (default: the image's natural size). For SVG, the whole drawing is scaled proportionally to fit width and/or height"`
 	Height    float64 `json:"height,omitempty" jsonschema:"height for the new rectangle (default: the image's natural size)"`
 	ScaleMode string  `json:"scale_mode,omitempty" jsonschema:"FILL (default), FIT, CROP, or TILE"`
 	Name      string  `json:"name,omitempty" jsonschema:"layer name"`
 	ParentID  string  `json:"parent_id,omitempty" jsonschema:"node ID to append into (default: current page)"`
+}
+
+type removeVariablesArgs struct {
+	fileArg
+	VariableIDs []string `json:"variable_ids" jsonschema:"variables to delete, ids from get_variable_defs"`
+}
+
+type removeCollectionArgs struct {
+	fileArg
+	CollectionID string `json:"collection_id" jsonschema:"variable collection to delete with all its variables, id from get_variable_defs"`
+}
+
+type importTokensArgs struct {
+	fileArg
+	Path       string `json:"path,omitempty" jsonschema:"tokens file inside the project, e.g. src/styles/tokens.css or tokens.json"`
+	Content    string `json:"content,omitempty" jsonschema:"the tokens themselves, instead of path"`
+	Format     string `json:"format,omitempty" jsonschema:"css or json (default: from the file extension, else from the content)"`
+	Collection string `json:"collection,omitempty" jsonschema:"collection that new variables go into, created if missing (default: the file's only collection, else Tokens). Variables that already exist are updated where they are"`
+	Mode       string `json:"mode,omitempty" jsonschema:"json only: mode to write the values into, by name (default: the collection's default mode). CSS takes its modes from the selectors"`
+	DryRun     bool   `json:"dry_run,omitempty" jsonschema:"report what would be created, updated and skipped without changing the file"`
 }
 
 type moveItem struct {
@@ -858,6 +879,12 @@ func Register(s *mcp.Server, b *bridge.Router) {
 	registerBridged[setVariableValueArgs](s, b, "set_variable_value",
 		"Set a variable's value for a mode (hex string for COLOR variables).",
 		bridge.DefaultTimeout)
+	registerBridged[removeVariablesArgs](s, b, "remove_variables",
+		"Delete variables. Nodes bound to one are detached and keep the value they showed.",
+		bridge.DefaultTimeout)
+	registerBridged[removeCollectionArgs](s, b, "remove_variable_collection",
+		"Delete a variable collection and every variable in it. Nodes bound to them are detached and keep the values they showed.",
+		bridge.DefaultTimeout)
 	registerBridged[setBoundVariableArgs](s, b, "set_bound_variable",
 		"Bind a variable to a node field such as fills, strokes, width, opacity or cornerRadius.",
 		bridge.DefaultTimeout)
@@ -944,6 +971,23 @@ func Register(s *mcp.Server, b *bridge.Router) {
 		}, nil, nil
 	})
 
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "import_tokens",
+		Description: "Create or update the file's variables from design tokens: CSS custom properties (:root is the default mode, " +
+			"[data-theme=\"x\"] or a class such as .dark is mode x) or a design-tokens JSON tree ($value, {a.b} aliases). " +
+			"It reads what export_tokens writes, so the two keep code and Figma in sync. Variables are matched by name, or by " +
+			"the CSS name export_tokens gave them, and updated in place; values already equal are left alone, so running it " +
+			"twice changes nothing. Colors become COLOR, numbers and px FLOAT, true/false BOOLEAN, anything else (1rem, a font " +
+			"stack) STRING; var(--x) and {a.b} become aliases. Missing modes are added; a Figma plan limited to fewer modes " +
+			"skips those values and says so. Run with dry_run first on a file that already has variables.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args importTokensArgs) (*mcp.CallToolResult, any, error) {
+		text, err := importTokens(ctx, b, args)
+		if err != nil {
+			return nil, nil, err
+		}
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}}, nil, nil
+	})
+
 	// get_screenshot returns an image, so it can't use registerBridged.
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "get_screenshot",
@@ -987,15 +1031,26 @@ func Register(s *mcp.Server, b *bridge.Router) {
 	// filesystem or free network access) and ships them to Figma as base64.
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "import_image",
-		Description: "Import an image from a URL or a project file into Figma, either as the fill of an " +
-			"existing node or as a new rectangle sized to the image.",
+		Description: "Import an image from a URL or a project file into Figma. PNG, JPG and GIF become the fill of an " +
+			"existing node or of a new rectangle sized to the image. SVG becomes editable vector layers, scaled " +
+			"proportionally to width/height and recolored with color: use it for icons and logos. When the file has no icon " +
+			"set of its own (look for icon components with find_nodes first, and reuse them with create_instance), take " +
+			"icons from a library by URL with an exact version, e.g. https://unpkg.com/lucide-static@<version>/icons/<name>.svg " +
+			"or https://unpkg.com/@tabler/icons@<version>/icons/outline/<name>.svg.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args importImageArgs) (*mcp.CallToolResult, any, error) {
 		data, err := loadImageBytes(ctx, args.Source)
 		if err != nil {
 			return nil, nil, err
 		}
-		raw, err := b.Call(ctx, args.File, "import_image", map[string]any{
-			"data":       base64.StdEncoding.EncodeToString(data),
+		params := map[string]any{"color": args.Color}
+		if isSVG(data) {
+			params["svg"] = string(data)
+		} else if args.Color != "" {
+			return nil, nil, fmt.Errorf("color recolors an SVG; %s is a raster image, whose pixels cannot be recolored", args.Source)
+		} else {
+			params["data"] = base64.StdEncoding.EncodeToString(data)
+		}
+		for k, v := range map[string]any{
 			"node_id":    args.NodeID,
 			"x":          args.X,
 			"y":          args.Y,
@@ -1004,7 +1059,10 @@ func Register(s *mcp.Server, b *bridge.Router) {
 			"scale_mode": args.ScaleMode,
 			"name":       args.Name,
 			"parent_id":  args.ParentID,
-		}, screenshotTimeout)
+		} {
+			params[k] = v
+		}
+		raw, err := b.Call(ctx, args.File, "import_image", params, screenshotTimeout)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -1129,6 +1187,18 @@ func Register(s *mcp.Server, b *bridge.Router) {
 			Content: []mcp.Content{&mcp.TextContent{Text: strings.Join(lines, "\n")}},
 		}, nil, nil
 	})
+}
+
+// isSVG tells SVG text from raster bytes: PNG, JPG and GIF open with binary
+// signatures, an SVG with markup (after an optional BOM, XML prolog or comment).
+func isSVG(data []byte) bool {
+	head := data
+	if len(head) > 4096 {
+		head = head[:4096]
+	}
+	head = bytes.TrimPrefix(head, []byte("\xef\xbb\xbf"))
+	head = bytes.TrimSpace(head)
+	return bytes.HasPrefix(head, []byte("<")) && bytes.Contains(bytes.ToLower(head), []byte("<svg"))
 }
 
 // maxImageBytes caps import_image payloads; Figma itself rejects images

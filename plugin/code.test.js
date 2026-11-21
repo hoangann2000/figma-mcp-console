@@ -163,5 +163,27 @@ eval(src + "\nglobalThis.__h = handlers; globalThis.__resolve = resolveRefs; glo
   assert.deepStrictEqual(made[1].fills, []);
   assert.deepStrictEqual((await __h.batch({ stop_on_error: true, ops: [{ command: "nope" }, { command: "list_pages" }] })).skipped, 1);
 
+  // import_image with SVG: vector layers, recolored, scaled as a whole
+  const glyph = { type: "VECTOR", fills: [], strokes: [{ type: "SOLID", color: { r: 0, g: 0, b: 0 }, opacity: 0.5 }] };
+  let scaled = null;
+  const svgFrame = { id: "S1", type: "FRAME", name: "svg", width: 24, height: 24, fills: ["white"],
+    findAll: () => [glyph], rescale(k) { scaled = k; this.width *= k; this.height *= k; } };
+  figma.createNodeFromSvg = (src) => { assert.match(src, /<svg/); return svgFrame; };
+  const svgNode = await __h.import_image({ svg: "<svg/>", name: "arrow-left", color: "#2563eb", width: 16, x: 8, y: 4 });
+  assert.deepStrictEqual([svgNode.name, svgFrame.fills, scaled, svgFrame.x, svgFrame.y], ["arrow-left", [], 16 / 24, 8, 4]);
+  assert.strictEqual(glyph.strokes[0].opacity, 0.5, "recolor keeps opacity");
+  assert.strictEqual(Math.round(glyph.strokes[0].color.b * 255), 0xeb);
+  assert.strictEqual(svgFrame.parent, figma.currentPage);
+  await assert.rejects(__h.import_image({ svg: "<svg/>", node_id: "1:1" }), /becomes layers, not a fill/);
+
+  // remove_variables / remove_variable_collection
+  const gone = [];
+  figma.variables.getVariableByIdAsync = async (id) => (id === "V1" ? { id, name: "color/bg", remove: () => gone.push(id) } : null);
+  figma.variables.getVariableCollectionByIdAsync = async (id) => (id === "C1" ? { id, name: "theme", variableIds: ["V1", "V2"], remove: () => gone.push(id) } : null);
+  assert.deepStrictEqual(await __h.remove_variables({ variable_ids: ["V1"] }), { removed: [{ id: "V1", name: "color/bg" }] });
+  await assert.rejects(__h.remove_variables({ variable_ids: ["V9"] }), /variable not found: V9/);
+  assert.deepStrictEqual((await __h.remove_variable_collection({ collection_id: "C1" })).removed, { id: "C1", name: "theme", variables: 2 });
+  assert.deepStrictEqual(gone, ["V1", "C1"]);
+
   console.log("ALL OK");
 })().catch((e) => { console.error(e); process.exit(1); });

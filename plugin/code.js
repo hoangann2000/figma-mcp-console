@@ -563,6 +563,36 @@ function resolveBatchRefs(v, results) {
 // they only work as their own tool call.
 const NOT_BATCHABLE = ["batch", "download_assets", "import_image", "get_screenshot"];
 
+// An SVG becomes editable vector layers (createImage takes only PNG, JPG and
+// GIF), scaled as a whole so stroke widths keep their proportion, the way a
+// designer scales an icon.
+async function importSvg(params) {
+  if (params.node_id) {
+    throw new Error("an SVG becomes layers, not a fill: omit node_id, and pass parent_id to place it inside a node");
+  }
+  const n = figma.createNodeFromSvg(params.svg);
+  n.fills = []; // the wrapper frame; the SVG's own shapes are its children
+  if (params.name) n.name = params.name;
+  if (params.color) {
+    const c = hexToRGB(params.color);
+    // Icons draw with fills or strokes (lucide uses strokes); recolor every
+    // solid paint and keep its opacity.
+    const recolor = (paints) => paints.map((p) => (p.type === "SOLID" ? Object.assign({}, p, { color: c }) : p));
+    for (const d of n.findAll(() => true)) {
+      if ("fills" in d && Array.isArray(d.fills) && d.fills.length) d.fills = recolor(d.fills);
+      if ("strokes" in d && Array.isArray(d.strokes) && d.strokes.length) d.strokes = recolor(d.strokes);
+    }
+  }
+  const w = params.width > 0 ? params.width / n.width : 0;
+  const h = params.height > 0 ? params.height / n.height : 0;
+  const scale = w && h ? Math.min(w, h) : w || h;
+  if (scale && Math.abs(scale - 1) > 1e-6) n.rescale(scale);
+  n.x = params.x || 0;
+  n.y = params.y || 0;
+  (await parentOf(params)).appendChild(n);
+  return summarize(n);
+}
+
 // ---------- command handlers (names match MCP tool names) ----------
 
 const handlers = {
@@ -843,6 +873,7 @@ const handlers = {
   },
 
   async import_image(params) {
+    if (params.svg !== undefined) return importSvg(params);
     const image = figma.createImage(figma.base64Decode(params.data));
     const paint = { type: "IMAGE", imageHash: image.hash, scaleMode: params.scale_mode || "FILL" };
     let n;
@@ -1433,6 +1464,28 @@ const handlers = {
         valuesByMode: v.valuesByMode,
       })),
     };
+  },
+
+  // Removing a variable detaches it from every node bound to it; those nodes
+  // keep the value they showed.
+  async remove_variables(params) {
+    const removed = [];
+    for (const id of params.variable_ids || []) {
+      const v = await figma.variables.getVariableByIdAsync(id);
+      if (!v) throw new Error("variable not found: " + id + " (see get_variable_defs)");
+      removed.push({ id: v.id, name: v.name });
+      v.remove();
+    }
+    if (!removed.length) throw new Error("variable_ids is required");
+    return { removed };
+  },
+
+  async remove_variable_collection(params) {
+    const c = await figma.variables.getVariableCollectionByIdAsync(params.collection_id);
+    if (!c) throw new Error("variable collection not found: " + params.collection_id + " (see get_variable_defs)");
+    const out = { removed: { id: c.id, name: c.name, variables: c.variableIds.length } };
+    c.remove();
+    return out;
   },
 
   async create_variable_collection(params) {
