@@ -80,11 +80,14 @@ There is no test harness for `plugin/code.js` — CI never runs it. At minimum `
 
 ## Releasing (maintainers)
 
-```sh
-vim npm/package.json          # version is the single source of truth
-./npm/build.sh                # 6 binaries + plugin copy -> npm/bin/
-cd npm && npm publish
-git tag v0.6.0 && git push origin v0.6.0
-```
+1. On `dev`: set the version in `npm/package.json` (the single source of truth) and turn `## [Unreleased]` in `CHANGELOG.md` into `## [X.Y.Z] - YYYY-MM-DD`. Open a PR to `main` and merge it.
+2. Tag the merge commit on `main` and push the tag:
 
-The tag is what triggers `release.yml`, which packages `plugin/` into `plugin.zip` and creates the GitHub Release. Binaries ship through npm only — no workflow publishes them. Publish and tag together: a release whose plugin speaks a newer protocol than the published server makes every user see the outdated warning.
+   ```sh
+   git checkout main && git pull
+   git tag vX.Y.Z && git push origin vX.Y.Z
+   ```
+
+The tag triggers `release.yml`, which does the rest: tests, checks that the tag matches `npm/package.json`, has a CHANGELOG section and sits on `main`, builds the six binaries with `npm/build.sh`, runs `npm publish`, then packages `plugin/` into `plugin.zip` and creates the GitHub Release with that CHANGELOG section as its notes. npm comes first on purpose: a plugin that speaks a newer protocol than the server on npm makes every user see the outdated warning.
+
+No npm token is involved: npm trusts this repo's `release.yml` through a Trusted Publisher (npmjs.com → the package → Settings → Trusted Publisher → GitHub Actions: `hoangann2000` / `figma-mcp-console` / `release.yml`). If a release fails at `npm publish` with an auth error, check that entry first; npm does not validate it when it is saved.

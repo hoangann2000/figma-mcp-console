@@ -208,6 +208,50 @@ func TestCallPluginError(t *testing.T) {
 	}
 }
 
+// A plugin that does not report a protocol predates it, and its errors carry
+// the re-import hint; a current one's errors stay as the plugin wrote them.
+func TestOutdatedPluginErrorSaysReimport(t *testing.T) {
+	b := New()
+	base := startBridge(t, b)
+	fail := func(req Request) *Response { return &Response{ID: req.ID, Error: "unknown command: audit_design"} }
+	fakePlugin(t, b, base, "Old", fail)
+	_, err := b.CallFile(context.Background(), "Old", "audit_design", nil, DefaultTimeout)
+	if err == nil || !strings.Contains(err.Error(), "re-import the plugin") || !strings.Contains(err.Error(), "unknown command: audit_design") {
+		t.Fatalf("outdated plugin: want original error plus re-import hint, got %v", err)
+	}
+
+	ctx := context.Background()
+	c, _, err := websocket.Dial(ctx, wsURL(base), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.CloseNow() })
+	wsjson.Write(ctx, c, map[string]any{"register": FileInfo{Name: "New", Protocol: ProtocolVersion}})
+	go func() {
+		for {
+			var req Request
+			if wsjson.Read(ctx, c, &req) != nil {
+				return
+			}
+			if req.ID != "" {
+				wsjson.Write(ctx, c, fail(req))
+			}
+		}
+	}()
+	waitUntil(t, "plugin New to attach", func() bool {
+		for _, f := range b.Files() {
+			if f.Name == "New" {
+				return true
+			}
+		}
+		return false
+	})
+	_, err = b.CallFile(ctx, "New", "audit_design", nil, DefaultTimeout)
+	if err == nil || strings.Contains(err.Error(), "re-import") {
+		t.Fatalf("current plugin: want the plain error, got %v", err)
+	}
+}
+
 func TestCallNotConnected(t *testing.T) {
 	b := New()
 	_, err := b.CallFile(context.Background(), "", "get_metadata", nil, DefaultTimeout)
@@ -304,4 +348,98 @@ func TestPeerRejectsBrowserOrigin(t *testing.T) {
 		t.Fatalf("peer without Origin rejected: %v", err)
 	}
 	c.CloseNow()
+}
+
+// A web page must not pose as the plugin; the plugin's own iframe sends "null".
+func TestPluginRejectsWebPageOrigin(t *testing.T) {
+	base := startBridge(t, New())
+	ctx := context.Background()
+	for origin, ok := range map[string]bool{"https://evil.example": false, "null": true, "https://www.figma.com": true, "": true} {
+		h := http.Header{}
+		if origin != "" {
+			h.Set("Origin", origin)
+		}
+		c, _, err := websocket.Dial(ctx, wsURL(base), &websocket.DialOptions{HTTPHeader: h})
+		if (err == nil) != ok {
+			t.Errorf("Origin %q: accepted=%v, want %v (err %v)", origin, err == nil, ok, err)
+		}
+		if c != nil {
+			c.CloseNow()
+		}
+	}
+}
+
+// Queue time is not the caller's time: a short call waiting behind a long one
+// must get its full timeout once the window is free.
+func TestQueueWaitIsOutsideTheCallTimeout(t *testing.T) {
+	b := New()
+	base := startBridge(t, b)
+	fakePlugin(t, b, base, "Shared File", func(req Request) *Response {
+		if req.Command == "slow" {
+			time.Sleep(300 * time.Millisecond)
+		}
+		return &Response{ID: req.ID, Result: json.RawMessage(`{}`)}
+	})
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if _, err := b.CallFile(context.Background(), "", "slow", nil, time.Second); err != nil {
+			t.Errorf("slow call: %v", err)
+		}
+	}()
+	waitUntil(t, "the slow call to take the window", func() bool { return b.inflight(1) > 0 })
+
+	// 150ms would expire while queued behind the 300ms call if waiting counted.
+	if _, err := b.CallFile(context.Background(), "", "quick", nil, 150*time.Millisecond); err != nil {
+		t.Fatalf("quick call behind a slow one: %v", err)
+	}
+	<-done
+}
+
+// A plugin window's own request (its checkpoint buttons) reaches the hook,
+// which can run a command in that same window before answering.
+func TestPluginHookRoundTrip(t *testing.T) {
+	b := New()
+	b.SetPluginHook(func(ctx context.Context, file FileInfo, req json.RawMessage,
+		call func(string, any) (json.RawMessage, error)) any {
+		out, err := call("get_design_context", map[string]string{"node_id": "1:1"})
+		if err != nil {
+			return map[string]string{"error": err.Error()}
+		}
+		return map[string]string{"file": file.Name, "req": string(req), "node": string(out)}
+	})
+	base := startBridge(t, b)
+	ctx := context.Background()
+	c, _, err := websocket.Dial(ctx, wsURL(base), nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer c.CloseNow()
+	wsjson.Write(ctx, c, map[string]any{"register": FileInfo{Name: "Demo"}})
+	waitUntil(t, "plugin to attach", func() bool { return len(b.Files()) == 1 && b.Files()[0].Name == "Demo" })
+	wsjson.Write(ctx, c, map[string]any{"checkpoint": map[string]string{"op": "diff"}})
+	for {
+		var m struct {
+			ID      string            `json:"id"`
+			Command string            `json:"command"`
+			Result  map[string]string `json:"checkpointResult"`
+		}
+		rctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		err := wsjson.Read(rctx, c, &m)
+		cancel()
+		if err != nil {
+			t.Fatalf("read: %v", err)
+		}
+		if m.Command != "" { // the hook's call into this window
+			wsjson.Write(ctx, c, Response{ID: m.ID, Result: json.RawMessage(`"tree"`)})
+			continue
+		}
+		if m.Result != nil {
+			if m.Result["file"] != "Demo" || m.Result["node"] != `"tree"` || m.Result["req"] != `{"op":"diff"}` {
+				t.Fatalf("result %+v", m.Result)
+			}
+			return
+		}
+	}
 }

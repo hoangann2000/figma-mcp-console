@@ -6,6 +6,7 @@
   "ui": "ui.html",
   "editorType": ["figma"],
   "documentAccess": "dynamic-page",
+  "enablePrivatePluginApi": true,
   "networkAccess": {
     "allowedDomains": ["none"],
     "devAllowedDomains": ["ws://localhost:2000"],

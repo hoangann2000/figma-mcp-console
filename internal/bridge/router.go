@@ -21,7 +21,12 @@ type Router struct {
 	project string
 	version string
 	port    int
+	hook    PluginHook
 }
+
+// SetPluginHook sets who answers plugin-window requests whenever this
+// session owns the bridge. Call it before Run.
+func (r *Router) SetPluginHook(h PluginHook) { r.hook = h }
 
 func NewRouter(project, version string, port int) *Router {
 	return &Router{project: project, version: version, port: port}
@@ -35,6 +40,7 @@ func (r *Router) Run() {
 		b := New()
 		b.SetProject(r.project)
 		b.SetVersion(r.version)
+		b.SetPluginHook(r.hook)
 		if lns, err := b.listen(r.port); err == nil {
 			dialFailures = 0
 			log.Printf("bridge: this session owns the bridge on ws://localhost:%d", r.port)

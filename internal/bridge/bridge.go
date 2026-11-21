@@ -49,6 +49,12 @@ type Response struct {
 type FileInfo struct {
 	Key  string `json:"key,omitempty"`
 	Name string `json:"name"`
+	// ReadOnly mirrors the plugin window's switch: while set, the plugin
+	// refuses every command that would change the file.
+	ReadOnly bool `json:"read_only"`
+	// Protocol is the plugin build's wire protocol. Plugins before 0.6.0 do
+	// not send it, which reads as 0: older than any server.
+	Protocol int `json:"protocol,omitempty"`
 }
 
 // pluginFrame is anything a plugin may send: a command response, or a
@@ -58,7 +64,15 @@ type pluginFrame struct {
 	Result   json.RawMessage `json:"result"`
 	Error    string          `json:"error"`
 	Register *FileInfo       `json:"register"`
+	// Checkpoint is a request the plugin window makes of the server (its
+	// checkpoint buttons), answered with a checkpointResult frame.
+	Checkpoint json.RawMessage `json:"checkpoint"`
 }
+
+// PluginHook answers a request made by a plugin window. call runs a command
+// in that same window, e.g. to read the node the request is about.
+type PluginHook func(ctx context.Context, file FileInfo, req json.RawMessage,
+	call func(command string, params any) (json.RawMessage, error)) any
 
 // ProtocolVersion is the plugin↔server wire-protocol version. The plugin
 // (ui.html) carries a matching constant and warns in its status line when the
@@ -66,7 +80,7 @@ type pluginFrame struct {
 // server is diagnosed up front instead of failing later with a cryptic
 // "unknown command". Bump it on any breaking change to the command set or
 // message shape the plugin must understand.
-const ProtocolVersion = 2
+const ProtocolVersion = 3
 
 // Keepalive tuning for plugin connections. A dead Figma window (asleep,
 // crashed tab, sleeping machine) may never send a TCP FIN, so the owner
@@ -101,7 +115,41 @@ type pluginConn struct {
 	mu       sync.Mutex
 	info     FileInfo
 	lastRead time.Time
+	// turn serializes commands to this window. The plugin's onmessage is async
+	// and does not queue, so two sessions driving one file interleave at every
+	// await: one resolves node handles while the other deletes those nodes.
+	// Capacity 1 is a lock that still honours ctx.
+	turn    chan struct{}
+	waiting atomic.Int32
 }
+
+// maxQueueWait bounds how long a call waits for its turn, not how long it runs.
+const maxQueueWait = 5 * time.Minute
+
+// acquire takes this window's turn, or reports that the command never ran.
+func (pc *pluginConn) acquire(ctx context.Context, command string) error {
+	select {
+	case pc.turn <- struct{}{}:
+		return nil
+	default:
+	}
+	pc.waiting.Add(1)
+	defer pc.waiting.Add(-1)
+	t := time.NewTimer(maxQueueWait)
+	defer t.Stop()
+	select {
+	case pc.turn <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return fmt.Errorf("figma plugin %q stayed busy for %s, so %q never reached it and nothing was applied — "+
+			"safe to retry, but run fewer sessions against this file at once",
+			pc.label(), maxQueueWait, command)
+	}
+}
+
+func (pc *pluginConn) release() { <-pc.turn }
 
 func (pc *pluginConn) sawFrame() {
 	pc.mu.Lock()
@@ -154,7 +202,11 @@ type Bridge struct {
 	project  string
 	version  string
 	port     int
+	hook     PluginHook
 }
+
+// SetPluginHook sets who answers requests made by plugin windows.
+func (b *Bridge) SetPluginHook(h PluginHook) { b.hook = h }
 
 func New() *Bridge {
 	return &Bridge{
@@ -228,8 +280,16 @@ func (b *Bridge) closeAll() {
 }
 
 func (b *Bridge) handlePlugin(w http.ResponseWriter, r *http.Request) {
-	// The plugin iframe has a null/opaque origin, so origin verification must
-	// be skipped; this is safe because we only bind to loopback.
+	// The plugin iframe has an opaque origin ("null"), which the library's
+	// same-host check can't express, so check here: any real web page sends
+	// its own origin and must not pose as a plugin. A sandboxed iframe on a
+	// hostile page also sends "null"; this raises the bar, it is not auth.
+	switch r.Header.Get("Origin") {
+	case "", "null", "https://www.figma.com", "https://figma.com":
+	default:
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
 	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
 	if err != nil {
 		log.Printf("bridge: plugin accept failed: %v", err)
@@ -237,7 +297,7 @@ func (b *Bridge) handlePlugin(w http.ResponseWriter, r *http.Request) {
 	}
 	c.SetReadLimit(maxMessageSize)
 
-	pc := &pluginConn{id: b.nextConn.Add(1), c: c}
+	pc := &pluginConn{id: b.nextConn.Add(1), c: c, turn: make(chan struct{}, 1)}
 	b.mu.Lock()
 	b.conns[pc.id] = pc
 	n := len(b.conns)
@@ -330,6 +390,24 @@ func (b *Bridge) readPlugin(pc *pluginConn) {
 			log.Printf("bridge: plugin registered file %q", f.Register.Name)
 			continue
 		}
+		if len(f.Checkpoint) > 0 {
+			if b.hook != nil {
+				// Own goroutine: the hook calls back into this window, and
+				// this loop must keep reading to deliver that answer.
+				go func(req json.RawMessage) {
+					file := pc.file()
+					ref := file.Key
+					if ref == "" {
+						ref = file.Name
+					}
+					res := b.hook(ctx, file, req, func(command string, params any) (json.RawMessage, error) {
+						return b.CallFile(ctx, ref, command, params, DefaultTimeout)
+					})
+					_ = pc.write(ctx, map[string]any{"checkpointResult": res})
+				}(f.Checkpoint)
+			}
+			continue
+		}
 		if f.ID == "" {
 			continue
 		}
@@ -348,7 +426,8 @@ func (b *Bridge) dropPlugin(pc *pluginConn, err error) {
 	delete(b.conns, pc.id)
 	for id, p := range b.pending {
 		if p.connID == pc.id {
-			p.ch <- Response{ID: id, Error: "plugin disconnected"}
+			p.ch <- Response{ID: id, Error: fmt.Sprintf("figma plugin %q disconnected before answering, so the command may or may not have run; "+
+				"re-run Plugins → Development → Figma MCP Console in that file, then check the document before retrying", pc.label())}
 			delete(b.pending, id)
 		}
 	}
@@ -447,6 +526,14 @@ func (b *Bridge) CallFile(ctx context.Context, file, command string, params any,
 	if err != nil {
 		return nil, err
 	}
+	// Wait for the window outside the timeout: a 15s call must not die because
+	// another session is mid-screenshot.
+	if err := pc.acquire(ctx, command); err != nil {
+		return nil, err
+	}
+	// Released on timeout too: Figma cannot abort a running command, so holding
+	// the turn would lock the file for everyone until that command finishes.
+	defer pc.release()
 
 	id := fmt.Sprintf("%d", b.nextID.Add(1))
 	ch := make(chan Response, 1)
@@ -469,7 +556,17 @@ func (b *Bridge) CallFile(ctx context.Context, file, command string, params any,
 	select {
 	case resp := <-ch:
 		if resp.Error != "" {
-			return nil, errors.New(resp.Error)
+			msg := resp.Error
+			// An outdated plugin answers new commands with "unknown command"
+			// and new arguments with type errors; neither tells the AI what
+			// the user has to do.
+			if p := pc.file().Protocol; p < ProtocolVersion {
+				msg += fmt.Sprintf(" — the Figma MCP Console plugin in %q is outdated (protocol %d, server %d), "+
+					"so commands added since may fail: tell the user to re-import the plugin from the latest release "+
+					"(github.com/hoangann2000/figma-mcp-console/releases/latest) and run it again",
+					pc.label(), p, ProtocolVersion)
+			}
+			return nil, errors.New(msg)
 		}
 		return resp.Result, nil
 	case <-ctx.Done():
@@ -477,16 +574,15 @@ func (b *Bridge) CallFile(ctx context.Context, file, command string, params any,
 		return nil, ctx.Err()
 	case <-timer.C:
 		unregister()
-		// A plugin runs one command at a time on Figma's main thread, so with
-		// several sessions driving it a timeout usually means queueing rather
-		// than a hang. Say which it was, so the caller knows a retry helps.
-		inflight := b.inflight(pc.id)
-		if inflight > 0 {
-			return nil, fmt.Errorf("figma plugin %q did not answer %q within %s; %d other command(s) are still in flight to it, "+
-				"so it is busy rather than stuck — retry, or run fewer sessions against this file at once",
-				pc.label(), command, timeout, inflight)
+		// This call had the window to itself, so it is slow or stuck — and
+		// Figma cannot abort it, so a blind retry of a write duplicates it.
+		msg := fmt.Sprintf("figma plugin %q did not answer %q within %s; "+
+			"it may still be running in Figma, so re-read the document before retrying anything that writes",
+			pc.label(), command, timeout)
+		if w := pc.waiting.Load(); w > 0 {
+			msg += fmt.Sprintf(" (%d command(s) from other sessions are queued behind it)", w)
 		}
-		return nil, fmt.Errorf("figma plugin %q did not answer %q within %s", pc.label(), command, timeout)
+		return nil, errors.New(msg)
 	}
 }
 
