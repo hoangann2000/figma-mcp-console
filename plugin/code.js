@@ -1044,9 +1044,78 @@ const handlers = {
     if (params.padding_left !== undefined) n.paddingLeft = params.padding_left;
     if (params.primary_axis_align) n.primaryAxisAlignItems = params.primary_axis_align;
     if (params.counter_axis_align) n.counterAxisAlignItems = params.counter_axis_align;
+    if (params.layout_wrap) {
+      if (params.layout_wrap === "WRAP" && n.layoutMode !== "HORIZONTAL") throw new Error("layout_wrap WRAP needs layout_mode HORIZONTAL");
+      n.layoutWrap = params.layout_wrap;
+    }
+    if (params.counter_axis_spacing !== undefined && params.counter_axis_spacing !== null) {
+      if (n.layoutWrap !== "WRAP") throw new Error("counter_axis_spacing is the gap between wrapped rows: set layout_wrap WRAP first");
+      n.counterAxisSpacing = params.counter_axis_spacing;
+    }
     if (params.primary_axis_sizing) n.primaryAxisSizingMode = params.primary_axis_sizing;
     if (params.counter_axis_sizing) n.counterAxisSizingMode = params.counter_axis_sizing;
     return done(params, n);
+  },
+
+  // How a layer sizes and sits inside its parent. FILL and HUG only mean
+  // something in auto layout, and Figma's own errors for that are opaque.
+  async set_layout_child(params) {
+    const nodes = await targets(params);
+    const has = (k) => params[k] !== undefined && params[k] !== null && params[k] !== "";
+    for (const n of nodes) {
+      const inAuto = n.parent && "layoutMode" in n.parent && n.parent.layoutMode !== "NONE";
+      const isAuto = "layoutMode" in n && n.layoutMode !== "NONE";
+      for (const [k, prop] of [["sizing_horizontal", "layoutSizingHorizontal"], ["sizing_vertical", "layoutSizingVertical"]]) {
+        if (!has(k)) continue;
+        const v = params[k];
+        if (v === "FILL" && !inAuto) throw new Error("node " + n.id + " cannot FILL: its parent " + (n.parent ? n.parent.name : "") + " has no auto layout (see set_auto_layout)");
+        if (v === "HUG" && !isAuto && n.type !== "TEXT") throw new Error("node " + n.id + " cannot HUG: only auto-layout frames and text hug their content");
+        n[prop] = v;
+      }
+      if (has("positioning")) {
+        if (!inAuto) throw new Error("node " + n.id + ": positioning applies to children of an auto-layout frame");
+        n.layoutPositioning = params.positioning;
+      }
+      for (const [k, prop] of [["min_width", "minWidth"], ["max_width", "maxWidth"], ["min_height", "minHeight"], ["max_height", "maxHeight"]]) {
+        if (params[k] === undefined || params[k] === null) continue;
+        if (!inAuto && !isAuto) throw new Error("node " + n.id + ": min/max sizes apply to auto-layout frames and their children");
+        n[prop] = params[k] > 0 ? params[k] : null; // 0 clears the limit
+      }
+      if (has("constraint_horizontal") || has("constraint_vertical")) {
+        if (!("constraints" in n)) throw new Error("node " + n.id + " is " + n.type + " and has no constraints");
+        n.constraints = {
+          horizontal: params.constraint_horizontal || n.constraints.horizontal,
+          vertical: params.constraint_vertical || n.constraints.vertical,
+        };
+      }
+    }
+    return done(params, nodes);
+  },
+
+  async set_node_properties(params) {
+    const nodes = await targets(params);
+    const given = (k) => params[k] !== undefined && params[k] !== null;
+    if (!["visible", "opacity", "rotation", "locked", "clips_content"].some(given)) {
+      throw new Error("pass at least one of visible, opacity, rotation, locked, clips_content");
+    }
+    for (const n of nodes) {
+      if (given("visible")) n.visible = params.visible;
+      if (given("locked")) n.locked = params.locked;
+      if (given("opacity")) {
+        if (!("opacity" in n)) throw new Error("node " + n.id + " is " + n.type + " and has no opacity");
+        if (params.opacity < 0 || params.opacity > 1) throw new Error("opacity is 0..1, got " + params.opacity);
+        n.opacity = params.opacity;
+      }
+      if (given("rotation")) {
+        if (!("rotation" in n)) throw new Error("node " + n.id + " is " + n.type + " and cannot rotate");
+        n.rotation = params.rotation;
+      }
+      if (given("clips_content")) {
+        if (!("clipsContent" in n)) throw new Error("node " + n.id + " is " + n.type + "; only frames and components clip their content");
+        n.clipsContent = params.clips_content;
+      }
+    }
+    return done(params, nodes);
   },
 
   async set_corner_radius(params) {

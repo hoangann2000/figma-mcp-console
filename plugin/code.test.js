@@ -283,5 +283,39 @@ eval(src + "\nglobalThis.__h = handlers; globalThis.__resolve = resolveRefs; glo
     await figma.ui.onmessage({ setReadOnly: false });
   }
 
+  {
+    // set_layout_child: FILL needs an auto-layout parent, HUG an auto-layout frame or text
+    const row = { id: "L:0", name: "Row", type: "FRAME", layoutMode: "HORIZONTAL" };
+    const plain = { id: "L:9", name: "Canvas", type: "FRAME", layoutMode: "NONE" };
+    const kid = { id: "L:1", type: "RECTANGLE", parent: row, constraints: { horizontal: "MIN", vertical: "MIN" } };
+    const loose = { id: "L:2", type: "RECTANGLE", parent: plain, constraints: { horizontal: "MIN", vertical: "MIN" } };
+    const label = { id: "L:3", type: "TEXT", parent: row };
+    Object.assign(nodes, { "L:1": kid, "L:2": loose, "L:3": label });
+    await __h.set_layout_child({ node_id: "L:1", sizing_horizontal: "FILL", min_width: 120, max_width: 0, positioning: "ABSOLUTE" });
+    assert.deepStrictEqual([kid.layoutSizingHorizontal, kid.minWidth, kid.maxWidth, kid.layoutPositioning], ["FILL", 120, null, "ABSOLUTE"]);
+    await __h.set_layout_child({ node_id: "L:3", sizing_horizontal: "HUG" });
+    await assert.rejects(__h.set_layout_child({ node_id: "L:2", sizing_horizontal: "FILL" }), /cannot FILL: its parent Canvas has no auto layout/);
+    await assert.rejects(__h.set_layout_child({ node_id: "L:1", sizing_vertical: "HUG" }), /cannot HUG/);
+    await assert.rejects(__h.set_layout_child({ node_id: "L:2", min_width: 10 }), /min\/max sizes apply/);
+    await __h.set_layout_child({ node_id: "L:2", constraint_horizontal: "STRETCH" });
+    assert.deepStrictEqual(loose.constraints, { horizontal: "STRETCH", vertical: "MIN" }, "the other axis is kept");
+
+    // set_node_properties: false and 0 are values, not "not given"
+    const box2 = { id: "L:4", type: "FRAME", visible: true, locked: false, opacity: 1, rotation: 0, clipsContent: true };
+    nodes["L:4"] = box2;
+    await __h.set_node_properties({ node_id: "L:4", visible: false, opacity: 0, clips_content: false, rotation: 90, locked: true });
+    assert.deepStrictEqual([box2.visible, box2.opacity, box2.clipsContent, box2.rotation, box2.locked], [false, 0, false, 90, true]);
+    await assert.rejects(__h.set_node_properties({ node_id: "L:4" }), /at least one of/);
+    await assert.rejects(__h.set_node_properties({ node_id: "L:4", opacity: 40 }), /opacity is 0\.\.1/);
+    await assert.rejects(__h.set_node_properties({ node_id: "L:1", clips_content: true }), /only frames and components clip/);
+
+    // set_auto_layout: wrap and the row gap
+    const grid = { id: "L:5", type: "FRAME", layoutMode: "NONE", layoutWrap: "NO_WRAP" };
+    nodes["L:5"] = grid;
+    await __h.set_auto_layout({ node_id: "L:5", layout_mode: "HORIZONTAL", layout_wrap: "WRAP", counter_axis_spacing: 16 });
+    assert.deepStrictEqual([grid.layoutWrap, grid.counterAxisSpacing], ["WRAP", 16]);
+    await assert.rejects(__h.set_auto_layout({ node_id: "L:5", layout_mode: "VERTICAL", layout_wrap: "WRAP" }), /needs layout_mode HORIZONTAL/);
+  }
+
   console.log("ALL OK");
 })().catch((e) => { console.error(e); process.exit(1); });
