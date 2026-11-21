@@ -6,6 +6,41 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-21
+
+### Upgrading from 0.6.x
+
+Re-import the Figma plugin: protocol 3 → 4. An 0.6 plugin keeps working for
+everything it knew; SVG import and the two `remove_*` tools need the new one,
+and errors from the old one say so.
+
+### Added
+
+- **`import_tokens`** — creates or updates variables from CSS custom properties
+  (`:root` = default mode, `[data-theme="x"]` or `.x` = mode x) or a
+  design-tokens JSON tree. It reads what `export_tokens` writes, so the two
+  keep code and Figma in sync: variables are matched by name or by the CSS
+  name `export_tokens` gave them and updated in place, equal values are left
+  alone (a second run changes nothing), and `var(--x)` / `{a.b}` become
+  aliases, also to variables created in the same run. Colors become COLOR,
+  numbers and `px` FLOAT, `true`/`false` BOOLEAN, anything else STRING.
+  Missing modes are added; when the Figma plan allows fewer modes, those values
+  are skipped and listed. `dry_run` reports the plan without writing. All
+  writes go out as one `batch`.
+- **`remove_variables`** and **`remove_variable_collection`**. Nodes bound to
+  a removed variable are detached and keep the value they showed.
+- **`import_image` takes SVG**: it becomes editable vector layers (Figma's
+  image fills take only PNG, JPG and GIF), scaled proportionally to
+  `width`/`height` with stroke widths kept in proportion, and `color`
+  recolors every solid fill and stroke. The tool description points at icon
+  libraries by URL with a pinned version, e.g.
+  `https://unpkg.com/lucide-static@<version>/icons/<name>.svg`, after checking
+  the file's own icon components first.
+
+### Notes
+
+- Tool count: 59 → 62.
+
 ## [0.6.0] - 2026-11-21
 
 ### Upgrading from 0.5.x

@@ -84,3 +84,17 @@ func TestAssetFileNameIsPathSafe(t *testing.T) {
 		}
 	}
 }
+
+func TestIsSVG(t *testing.T) {
+	for in, want := range map[string]bool{
+		`<svg xmlns="http://www.w3.org/2000/svg"/>`:                 true,
+		"\xef\xbb\xbf  <?xml version=\"1.0\"?>\n<!-- x -->\n<SVG/>": true,
+		"\x89PNG\r\n\x1a\n....<svg":                                 false, // a PNG that happens to contain the bytes
+		"\xff\xd8\xff\xe0 JFIF":                                     false,
+		"<html><body>not found</body></html>":                       false,
+	} {
+		if got := isSVG([]byte(in)); got != want {
+			t.Errorf("isSVG(%q) = %v, want %v", in, got, want)
+		}
+	}
+}
