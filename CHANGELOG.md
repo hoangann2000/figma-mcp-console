@@ -6,6 +6,8 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-21
+
 ### Upgrading from 0.8.x
 
 Re-import the Figma plugin: protocol 5 → 6.
