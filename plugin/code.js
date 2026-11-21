@@ -624,6 +624,33 @@ function explainError(message) {
   return message;
 }
 
+function applyAutoLayout(n, params) {
+  if (!("layoutMode" in n)) throw new Error("node " + n.id + " does not support auto-layout");
+  n.layoutMode = params.layout_mode;
+  if (params.layout_mode === "NONE") return;
+
+  if (params.item_spacing !== undefined) n.itemSpacing = params.item_spacing;
+  if (params.padding !== undefined) {
+    n.paddingTop = n.paddingRight = n.paddingBottom = n.paddingLeft = params.padding;
+  }
+  if (params.padding_top !== undefined) n.paddingTop = params.padding_top;
+  if (params.padding_right !== undefined) n.paddingRight = params.padding_right;
+  if (params.padding_bottom !== undefined) n.paddingBottom = params.padding_bottom;
+  if (params.padding_left !== undefined) n.paddingLeft = params.padding_left;
+  if (params.primary_axis_align) n.primaryAxisAlignItems = params.primary_axis_align;
+  if (params.counter_axis_align) n.counterAxisAlignItems = params.counter_axis_align;
+  if (params.layout_wrap) {
+    if (params.layout_wrap === "WRAP" && n.layoutMode !== "HORIZONTAL") throw new Error("layout_wrap WRAP needs layout_mode HORIZONTAL");
+    n.layoutWrap = params.layout_wrap;
+  }
+  if (params.counter_axis_spacing !== undefined && params.counter_axis_spacing !== null) {
+    if (n.layoutWrap !== "WRAP") throw new Error("counter_axis_spacing is the gap between wrapped rows: set layout_wrap WRAP first");
+    n.counterAxisSpacing = params.counter_axis_spacing;
+  }
+  if (params.primary_axis_sizing) n.primaryAxisSizingMode = params.primary_axis_sizing;
+  if (params.counter_axis_sizing) n.counterAxisSizingMode = params.counter_axis_sizing;
+}
+
 // ---------- command handlers (names match MCP tool names) ----------
 
 const handlers = {
@@ -1095,31 +1122,9 @@ const handlers = {
   },
 
   async set_auto_layout(params) {
-    const n = await node(params.node_id);
-    if (!("layoutMode" in n)) throw new Error("node " + params.node_id + " does not support auto-layout");
-    n.layoutMode = params.layout_mode;
-    if (params.layout_mode === "NONE") return done(params, n);
-    if (params.item_spacing !== undefined) n.itemSpacing = params.item_spacing;
-    if (params.padding !== undefined) {
-      n.paddingTop = n.paddingRight = n.paddingBottom = n.paddingLeft = params.padding;
-    }
-    if (params.padding_top !== undefined) n.paddingTop = params.padding_top;
-    if (params.padding_right !== undefined) n.paddingRight = params.padding_right;
-    if (params.padding_bottom !== undefined) n.paddingBottom = params.padding_bottom;
-    if (params.padding_left !== undefined) n.paddingLeft = params.padding_left;
-    if (params.primary_axis_align) n.primaryAxisAlignItems = params.primary_axis_align;
-    if (params.counter_axis_align) n.counterAxisAlignItems = params.counter_axis_align;
-    if (params.layout_wrap) {
-      if (params.layout_wrap === "WRAP" && n.layoutMode !== "HORIZONTAL") throw new Error("layout_wrap WRAP needs layout_mode HORIZONTAL");
-      n.layoutWrap = params.layout_wrap;
-    }
-    if (params.counter_axis_spacing !== undefined && params.counter_axis_spacing !== null) {
-      if (n.layoutWrap !== "WRAP") throw new Error("counter_axis_spacing is the gap between wrapped rows: set layout_wrap WRAP first");
-      n.counterAxisSpacing = params.counter_axis_spacing;
-    }
-    if (params.primary_axis_sizing) n.primaryAxisSizingMode = params.primary_axis_sizing;
-    if (params.counter_axis_sizing) n.counterAxisSizingMode = params.counter_axis_sizing;
-    return done(params, n);
+    const nodes = await targets(params);
+    for (const n of nodes) applyAutoLayout(n, params);
+    return done(params, nodes);
   },
 
   // How a layer sizes and sits inside its parent. FILL and HUG only mean

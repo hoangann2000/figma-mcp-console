@@ -11,6 +11,8 @@ these.
 
 ### Changed
 
+- `set_auto_layout` takes `node_ids` like the other `set_*` tools, so a list
+  of frames gets the same layout in one call. `node_id` works as before.
 - **`audit_design` touch targets** (`min_touch`): the outermost control is the
   tap target, so icons inside a button or menu item are no longer candidates;
   icons that act on their own (close, trash, edit, eye, copy, calendar, …)

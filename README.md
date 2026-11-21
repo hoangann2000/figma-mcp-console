@@ -257,6 +257,13 @@ Exports follow the file extension the AI picks (`.svg` for vector, `.png`/`.jpg`
 | ⚠ "Server outdated" | Restart your AI client, or update the version in its MCP config |
 | 👁 The plugin will not run in a file | Figma runs plugins only for people who can edit the file. Duplicate it to your drafts, or copy the frames into a file you can edit |
 
+## 🔢 Versions
+
+- The **server** (npm) and the **plugin** (`plugin.zip`) are released together under one version. Use the plugin from the same release as the server; the plugin window warns when they differ.
+- From 1.0, versions follow [semantic versioning](https://semver.org): a tool or parameter is removed or renamed, or a default changes what a call does, only in a new **major** version. New tools and new optional parameters come in **minor** versions; fixes in **patch** versions.
+- A release that changes the plugin protocol says so under "Upgrading" in the [changelog](CHANGELOG.md); only those need the plugin re-imported.
+- To stay on a known version, pin it in your MCP config: `figma-mcp-console@1.0.0` instead of `@latest`.
+
 ## 🛠 Contributing
 
 Setup, how to add a tool, and the gotchas that cost time: **[CONTRIBUTING.md](CONTRIBUTING.md)**. Why the non-obvious parts work the way they do: **[docs/design-notes.md](docs/design-notes.md)**.

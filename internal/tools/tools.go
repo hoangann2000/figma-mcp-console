@@ -409,7 +409,7 @@ type deleteArgs struct {
 
 type autoLayoutArgs struct {
 	fileArg
-	NodeID            string   `json:"node_id" jsonschema:"frame or component node ID"`
+	nodeTarget
 	LayoutMode        string   `json:"layout_mode" jsonschema:"HORIZONTAL, VERTICAL, or NONE to remove auto-layout"`
 	ItemSpacing       *float64 `json:"item_spacing,omitempty" jsonschema:"gap between children in pixels"`
 	Padding           *float64 `json:"padding,omitempty" jsonschema:"uniform padding on all four sides"`
@@ -423,7 +423,6 @@ type autoLayoutArgs struct {
 	CounterAxisSizing string   `json:"counter_axis_sizing,omitempty" jsonschema:"FIXED or AUTO (hug contents)"`
 	LayoutWrap        string   `json:"layout_wrap,omitempty" jsonschema:"WRAP so children flow onto new rows when they run out of width (HORIZONTAL only), or NO_WRAP"`
 	CounterAxisGap    *float64 `json:"counter_axis_spacing,omitempty" jsonschema:"gap between wrapped rows in pixels; needs layout_wrap WRAP"`
-	Verbose           bool     `json:"verbose,omitempty" jsonschema:"return the full node summary instead of just the id"`
 }
 
 type layoutChildArgs struct {

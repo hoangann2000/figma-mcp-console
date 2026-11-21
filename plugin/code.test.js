@@ -315,6 +315,10 @@ eval(src + "\nglobalThis.__h = handlers; globalThis.__resolve = resolveRefs; glo
     await __h.set_auto_layout({ node_id: "L:5", layout_mode: "HORIZONTAL", layout_wrap: "WRAP", counter_axis_spacing: 16 });
     assert.deepStrictEqual([grid.layoutWrap, grid.counterAxisSpacing], ["WRAP", 16]);
     await assert.rejects(__h.set_auto_layout({ node_id: "L:5", layout_mode: "VERTICAL", layout_wrap: "WRAP" }), /needs layout_mode HORIZONTAL/);
+    const a1 = { id: "L:6", type: "FRAME", layoutMode: "NONE" }, a2 = { id: "L:7", type: "FRAME", layoutMode: "NONE" };
+    nodes["L:6"] = a1; nodes["L:7"] = a2;
+    const al = await __h.set_auto_layout({ node_ids: ["L:6", "L:7"], layout_mode: "VERTICAL", padding: 8 });
+    assert.deepStrictEqual([al.ids, a1.layoutMode, a2.paddingLeft], [["L:6", "L:7"], "VERTICAL", 8], "one call, many frames");
   }
 
   {
