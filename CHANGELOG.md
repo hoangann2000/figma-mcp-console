@@ -6,6 +6,17 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-11-21
+
+No plugin re-import needed: the protocol is unchanged.
+
+### Security
+
+- Paths the tools read or write (`download_assets`, `out`, `import_tokens`,
+  `import_image`, `diff_design` baselines) are now checked after resolving
+  symlinks: a symlinked folder or file inside the project that points outside
+  it is refused. Before, only the path's text was checked.
+
 ## [0.8.0] - 2026-11-21
 
 ### Upgrading from 0.7.x
