@@ -6,6 +6,10 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-11-21
+
+No plugin re-import needed: the protocol is unchanged.
+
 ### Security
 
 - Paths the tools read or write (`download_assets`, `out`, `import_tokens`,
