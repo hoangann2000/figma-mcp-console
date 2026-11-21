@@ -12,10 +12,13 @@ import (
 	_ "image/jpeg" // image.DecodeConfig for download_assets
 	_ "image/png"
 	"io"
+	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -45,7 +48,7 @@ func downloadTimeout(items int) time.Duration {
 // fileArg routes a call when several Figma files run the plugin at once.
 // Embed it in every tool's args struct.
 type fileArg struct {
-	File string `json:"file,omitempty" jsonschema:"which connected Figma file to act on: its file name (case-insensitive, unique substring ok) or file key, see list_files. Omit when only one file is connected"`
+	File string `json:"file,omitempty" jsonschema:"connected file's name or key (see list_files); omit if only one is connected"`
 }
 
 func (f fileArg) fileTarget() string { return f.File }
@@ -160,6 +163,23 @@ type createTextArgs struct {
 type setPageArgs struct {
 	fileArg
 	Page string `json:"page" jsonschema:"page to open: its name (case-insensitive, unique substring ok) or id, see list_pages"`
+}
+
+type createPageArgs struct {
+	fileArg
+	Name  string `json:"name" jsonschema:"name of the new page"`
+	Index *int   `json:"index,omitempty" jsonschema:"position among the pages, 0 = first (default: last)"`
+}
+
+type renamePageArgs struct {
+	fileArg
+	Page string `json:"page" jsonschema:"page to rename: name (case-insensitive, unique substring ok) or id, see list_pages"`
+	Name string `json:"name" jsonschema:"new page name"`
+}
+
+type removePageArgs struct {
+	fileArg
+	Page string `json:"page" jsonschema:"page to delete with everything on it: name or id, see list_pages"`
 }
 
 type findArgs struct {
@@ -295,7 +315,7 @@ type createLineArgs struct {
 
 type importImageArgs struct {
 	fileArg
-	Source    string  `json:"source" jsonschema:"image to import: an http(s) URL or a file path relative to the project directory. PNG, JPG and GIF become an image fill; SVG becomes editable vector layers"`
+	Source    string  `json:"source" jsonschema:"image to import: a public https URL or a file path relative to the project directory. PNG, JPG and GIF become an image fill; SVG becomes editable vector layers"`
 	NodeID    string  `json:"node_id,omitempty" jsonschema:"existing node to apply a PNG/JPG/GIF to as a fill; omit to create a new rectangle. Not for SVG, which becomes layers (use parent_id)"`
 	Color     string  `json:"color,omitempty" jsonschema:"SVG only: recolor every solid fill and stroke to this hex, e.g. #111827, the usual way to tint an icon"`
 	X         float64 `json:"x,omitempty" jsonschema:"x position for the new rectangle"`
@@ -527,9 +547,9 @@ type prototypeLinkItem struct {
 	NodeID        string   `json:"node_id" jsonschema:"source node that reacts, e.g. a button frame or instance"`
 	DestinationID string   `json:"destination_id,omitempty" jsonschema:"frame to go to; required for NAVIGATE, SWAP and OVERLAY, and must be omitted for BACK and CLOSE"`
 	Trigger       string   `json:"trigger,omitempty" jsonschema:"ON_CLICK (default), ON_HOVER, ON_PRESS or ON_DRAG"`
-	Navigation    string   `json:"navigation,omitempty" jsonschema:"NAVIGATE (default), SWAP, OVERLAY, BACK or CLOSE; BACK and CLOSE take no destination_id"`
+	Navigation    string   `json:"navigation,omitempty" jsonschema:"NAVIGATE (default), SWAP, OVERLAY, BACK or CLOSE"`
 	Transition    string   `json:"transition,omitempty" jsonschema:"animation between the frames: none by default, else DISSOLVE, SMART_ANIMATE, SCROLL_ANIMATE, MOVE_IN, MOVE_OUT, PUSH, SLIDE_IN or SLIDE_OUT"`
-	Direction     string   `json:"direction,omitempty" jsonschema:"LEFT (default), RIGHT, TOP or BOTTOM; only for the directional transitions MOVE_IN, MOVE_OUT, PUSH, SLIDE_IN, SLIDE_OUT"`
+	Direction     string   `json:"direction,omitempty" jsonschema:"LEFT (default), RIGHT, TOP or BOTTOM; for MOVE_IN, MOVE_OUT, PUSH, SLIDE_IN, SLIDE_OUT"`
 	Duration      *float64 `json:"duration,omitempty" jsonschema:"transition duration in seconds (default 0.3); ignored without a transition"`
 	Easing        string   `json:"easing,omitempty" jsonschema:"EASE_OUT (default), EASE_IN, EASE_IN_AND_OUT or LINEAR; ignored without a transition"`
 }
@@ -637,6 +657,15 @@ func Register(s *mcp.Server, b *bridge.Router) {
 		bridge.DefaultTimeout)
 	registerBridged[setPageArgs](s, b, "set_current_page",
 		"Open a page by name or id, so subsequent create/find calls act on it. Use this instead of hoping the right page is open.",
+		bridge.DefaultTimeout)
+	registerBridged[createPageArgs](s, b, "create_page",
+		"Add a page to the file. It does not open it; use set_current_page for that. Figma's Starter plan limits a file to 3 pages.",
+		bridge.DefaultTimeout)
+	registerBridged[renamePageArgs](s, b, "rename_page",
+		"Rename a page.",
+		bridge.DefaultTimeout)
+	registerBridged[removePageArgs](s, b, "remove_page",
+		"Delete a page and everything on it. If it is the open page, the page before it is opened first; the file's only page cannot be removed. Confirm with the user before deleting a page with content.",
 		bridge.DefaultTimeout)
 	registerBridged[emptyArgs](s, b, "get_metadata",
 		"Get the current Figma document: file name, current page, and a summary of the page's top-level layers.",
@@ -1205,11 +1234,59 @@ func isSVG(data []byte) bool {
 // larger than 4096x4096.
 const maxImageBytes = 20 << 20
 
-var imageClient = &http.Client{Timeout: 60 * time.Second}
+// imageClient fetches only public https addresses. The AI picks the URL, and
+// text it read (a spec, a design) could steer it at this machine or the local
+// network; the check runs on the address actually dialed, so a redirect or a
+// DNS name pointing inward is refused too. Environment proxies are ignored,
+// since they would dial on our behalf past the check.
+var imageClient = &http.Client{
+	Timeout: 60 * time.Second,
+	Transport: &http.Transport{
+		Proxy: nil,
+		DialContext: (&net.Dialer{
+			Timeout: 15 * time.Second,
+			Control: func(_, address string, _ syscall.RawConn) error {
+				host, _, err := net.SplitHostPort(address)
+				if err != nil {
+					return err
+				}
+				ip, err := netip.ParseAddr(host)
+				if err != nil || !publicAddr(ip) {
+					return fmt.Errorf("%s is not a public address: images are fetched only from the internet", host)
+				}
+				return nil
+			},
+		}).DialContext,
+		TLSHandshakeTimeout:   15 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second,
+	},
+	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 5 {
+			return fmt.Errorf("more than 5 redirects")
+		}
+		if req.URL.Scheme != "https" {
+			return fmt.Errorf("redirected to %s, which is not https", req.URL.Redacted())
+		}
+		return nil
+	},
+}
+
+// cgnat is 100.64.0.0/10, shared address space that netip does not flag.
+var cgnat = netip.MustParsePrefix("100.64.0.0/10")
+
+// publicAddr reports whether ip is a routable internet address.
+func publicAddr(ip netip.Addr) bool {
+	ip = ip.Unmap()
+	return ip.IsValid() && ip.IsGlobalUnicast() && !ip.IsPrivate() && !ip.IsLoopback() &&
+		!ip.IsLinkLocalUnicast() && !cgnat.Contains(ip) && !(ip.Is4() && ip.As4()[0] == 0)
+}
 
 // loadImageBytes fetches an http(s) URL or reads a file inside the project.
 func loadImageBytes(ctx context.Context, source string) ([]byte, error) {
-	if strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") {
+	if strings.HasPrefix(source, "http://") {
+		return nil, fmt.Errorf("only https URLs are fetched; use the https:// address of %s", strings.TrimPrefix(source, "http://"))
+	}
+	if strings.HasPrefix(source, "https://") {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, source, nil)
 		if err != nil {
 			return nil, fmt.Errorf("bad image URL: %w", err)

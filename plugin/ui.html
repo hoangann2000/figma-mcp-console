@@ -289,7 +289,7 @@
   // the status line also trigger an immediate attempt.
   const PORT = 2000,
     RETRY = 1000,
-    PROTOCOL = 4; // must match bridge.ProtocolVersion in the Go server
+    PROTOCOL = 5; // must match bridge.ProtocolVersion in the Go server
   let ws = null; // open connection, null while disconnected
   let attempt = null; // socket currently trying to connect
   let reg = null; // {key, name} of this file, sent by the main thread

@@ -1,6 +1,10 @@
 package tools
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -96,5 +100,33 @@ func TestIsSVG(t *testing.T) {
 		if got := isSVG([]byte(in)); got != want {
 			t.Errorf("isSVG(%q) = %v, want %v", in, got, want)
 		}
+	}
+}
+
+func TestPublicAddr(t *testing.T) {
+	for in, want := range map[string]bool{
+		"8.8.8.8": true, "104.16.0.1": true, "2606:4700::1": true,
+		"127.0.0.1": false, "10.1.2.3": false, "172.16.0.1": false, "192.168.1.10": false,
+		"169.254.169.254": false, "100.64.0.1": false, "0.0.0.0": false, "0.1.2.3": false,
+		"::1": false, "fe80::1": false, "fd00::1": false, "::ffff:127.0.0.1": false, "224.0.0.1": false,
+	} {
+		if got := publicAddr(netip.MustParseAddr(in)); got != want {
+			t.Errorf("publicAddr(%s) = %v, want %v", in, got, want)
+		}
+	}
+}
+
+// The check runs where the connection is made, so an https server on this
+// machine is refused even though the URL itself looks fine.
+func TestLoadImageRefusesLocalAndHTTP(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("<svg/>"))
+	}))
+	defer srv.Close()
+	if _, err := loadImageBytes(context.Background(), srv.URL+"/icon.svg"); err == nil || !strings.Contains(err.Error(), "not a public address") {
+		t.Errorf("local https: want refusal, got %v", err)
+	}
+	if _, err := loadImageBytes(context.Background(), "http://example.com/a.png"); err == nil || !strings.Contains(err.Error(), "only https") {
+		t.Errorf("http: want refusal, got %v", err)
 	}
 }

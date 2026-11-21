@@ -11,8 +11,12 @@
 
 - 🖥️ **Figma → Code** — paste a link to a Figma frame, and the AI implements that exact screen in your codebase, exporting the design's icons and images into your project instead of inventing its own
 - 🎨 **Requirement → Figma** — paste a requirement, and the AI draws the screen in Figma, then screenshots its own work and fixes what's off
-- 🔁 **Token sync** — pull design tokens into your theme config, or build a design system in Figma from your code
-- ✏️ **Bulk editing** — rename layers, replace text across a page, reorganize frames
+- 🔁 **Token sync** — export Figma variables to CSS or design-tokens JSON (`export_tokens`), and import them back from your code (`import_tokens`), updating what changed instead of duplicating
+- ✅ **Design checks** — `audit_design` lists layers that are cut off or overflow, text that spills or is truncated, text below WCAG contrast, and tap targets that are too small
+- 🔍 **What changed in the design** — `diff_design` compares a frame with a checkpoint you save from the plugin window; `get_component_states` lists every state a screen's components define
+- ✏️ **Bulk editing** — rename layers, replace text across a page, reorganize frames; `batch` runs many steps in one call
+- 🎯 **Icons** — import SVG icons as editable vectors, resized and recolored, from your file's own components or an icon library
+- 🔒 **Read-only by default** — the AI can read a file but not change it until you untick **Read-only** in the plugin window
 
 ---
 
@@ -180,7 +184,8 @@ Then, in both cases:
 
 2. In **Figma Desktop**: **Plugins → Development → Import plugin from manifest…** → select `manifest.json` *(one-time step)*
 3. Run it: **Plugins → Development → Figma MCP Console** — and **keep the plugin window open** while you work. 🟢 Green dot = connected
-4. Working with several Figma files at once? Run the plugin in **each** file — every window connects to the same local bridge, and the AI picks the right file per call
+4. **Untick Read-only** in the plugin window when you want the AI to change the design. It is ticked every time the plugin opens, so a file you only want read stays safe; reading, screenshots, exports and checks work either way
+5. Working with several Figma files at once? Run the plugin in **each** file — every window connects to the same local bridge, and the AI picks the right file per call
 
 ### Step 3 — Try it
 
@@ -200,7 +205,11 @@ cards, pricing with three plans, footer. Light theme, use auto-layout, then
 screenshot and fix anything off.
 ```
 
-> 🎯 Asking the AI to **screenshot and compare** at the end makes it check its own work instead of guessing.
+> 🎯 Asking the AI to **run `audit_design`, then screenshot and compare** at the end makes it check its own work instead of guessing.
+
+### Updating
+
+When you update the server (`figma-mcp-console@<version>`), **re-import the plugin** from that release's `plugin.zip`: a hand-installed plugin cannot update itself. The plugin window says *Plugin outdated* or *Server outdated* when the two do not match. Release notes: [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
@@ -243,6 +252,10 @@ Exports follow the file extension the AI picks (`.svg` for vector, `.png`/`.jpg`
 | 🚫 The MCP server doesn't appear in your AI tool | Check Node.js 18+ is installed (`node -v`) |
 | 📁 Exported files end up in the wrong folder | Exports are written relative to where the server runs. Register it in the project-level config, or tell the AI an explicit export path |
 | 🔤 Font errors when creating text | The Figma file uses a font not installed on your machine — the error message names it |
+| 🔒 "… was blocked: read-only mode is on" | **Read-only** is ticked in that file's plugin window (it is, every time the plugin opens). Untick it if the edit is intended |
+| ⚠ "Plugin outdated" / "the plugin … is outdated" | Re-import the plugin from the latest release's `plugin.zip` and run it again |
+| ⚠ "Server outdated" | Restart your AI client, or update the version in its MCP config |
+| 👁 The plugin will not run in a file | Figma runs plugins only for people who can edit the file. Duplicate it to your drafts, or copy the frames into a file you can edit |
 
 ## 🛠 Contributing
 
