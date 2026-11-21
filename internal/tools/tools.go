@@ -119,10 +119,11 @@ type createShapeArgs struct {
 
 type auditArgs struct {
 	fileArg
-	NodeID     string   `json:"node_id" jsonschema:"frame, section or component to audit, e.g. \"12:34\""`
-	Checks     []string `json:"checks,omitempty" jsonschema:"which checks to run: layout, contrast (default: both)"`
-	MinTouch   float64  `json:"min_touch,omitempty" jsonschema:"also report controls smaller than this many pixels on either side, e.g. 44 for a mobile screen. Off by default: desktop designs fail it by design"`
-	MaxResults int      `json:"max_results,omitempty" jsonschema:"maximum findings to list (default 100); the summary always counts all of them"`
+	NodeID      string   `json:"node_id" jsonschema:"frame, section or component to audit, e.g. \"12:34\""`
+	Checks      []string `json:"checks,omitempty" jsonschema:"which checks to run: layout, contrast (default: both)"`
+	MinTouch    float64  `json:"min_touch,omitempty" jsonschema:"also report controls smaller than this many pixels on either side, e.g. 44 for a mobile screen. Off by default: desktop designs fail it by design"`
+	MaxResults  int      `json:"max_results,omitempty" jsonschema:"maximum findings to list (default 100); the summary always counts all of them"`
+	MeasureText bool     `json:"measure_text,omitempty" jsonschema:"measure fixed-size text exactly instead of estimating it: a copy of each such layer is added, measured and removed within the call. Needs Read-only off; while it is on the estimate is used"`
 }
 
 type batchOp struct {

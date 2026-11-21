@@ -355,5 +355,45 @@ eval(src + "\nglobalThis.__h = handlers; globalThis.__resolve = resolveRefs; glo
     await assert.rejects(__h.set_node_properties({ node_id: "TX", description: "x" }), /only components and component sets/);
   }
 
+  {
+    // touch targets: the outermost control counts, action icons count on their own, padded wrappers are fine
+    const B = (x, y, w, h) => ({ x, y, width: w, height: h });
+    const mkI = (id, name, w, parent) => ({ id, name, type: "INSTANCE", visible: true, absoluteBoundingBox: B(0, 0, w, w), parent });
+    const scr = { id: "T:0", name: "Scr", type: "FRAME", visible: true, absoluteBoundingBox: B(0, 0, 400, 400), children: [] };
+    const btn = { id: "T:1", name: "Button", type: "INSTANCE", visible: true, absoluteBoundingBox: B(0, 0, 120, 48), parent: scr, children: [] };
+    btn.children = [mkI("T:2", "vuesax/linear/trash", 20, btn)];              // inside a button: the button is the target
+    const field = { id: "T:3", name: "Input Area", type: "FRAME", visible: true, absoluteBoundingBox: B(0, 60, 300, 48), parent: scr, children: [] };
+    field.children = [mkI("T:4", "vuesax/linear/eye-slash", 20, field), mkI("T:5", "vuesax/linear/tick-circle", 18, field)];
+    const pad = { id: "T:6", name: "hit", type: "FRAME", visible: true, absoluteBoundingBox: B(0, 120, 44, 44), parent: scr, children: [] };
+    pad.children = [mkI("T:7", "x-close", 16, pad)];                           // 44px wrapper holding only the icon
+    const item = { id: "T:8", name: "menu-item", type: "FRAME", visible: true, absoluteBoundingBox: B(0, 180, 200, 40), parent: scr, children: [] };
+    item.children = [mkI("T:9", "vuesax/linear/calendar-2", 20, item)];
+    scr.children = [btn, field, pad, item];
+    nodes["T:0"] = scr;
+    const tt = await __h.audit_design({ node_id: "T:0", checks: ["layout"], min_touch: 44 });
+    assert.deepStrictEqual(tt.issues.filter((i) => i.issue === "small_touch_target").map((i) => i.id + " " + i.because),
+      ["T:4 action icon", "T:8 name"]);
+
+    // measure_text: a copy is measured and always removed; skipped under Read-only
+    let copies = 0, removed = 0;
+    const mkText = (id, need) => ({ id, name: id, type: "TEXT", visible: true, characters: "Some label", fontSize: 14, textAutoResize: "NONE", textTruncation: "ENDING",
+      absoluteBoundingBox: B(0, 0, 100, 20), absoluteRenderBounds: B(0, 0, 100, 20), parent: scr,
+      getRangeAllFontNames: () => [{ family: "Inter", style: "Regular" }],
+      clone() { copies++; return { height: need, remove() { removed++; } }; } });
+    const cut = mkText("M:1", 40), fits = mkText("M:2", 20);
+    const bad = mkText("M:3", 40); bad.clone = () => { copies++; return { get height() { throw new Error("boom"); }, remove() { removed++; } }; };
+    scr.children = [cut, fits, bad];
+    const mt = await __h.audit_design({ node_id: "T:0", checks: ["layout"], measure_text: true });
+    assert.deepStrictEqual(mt.issues.map((i) => [i.id, i.issue, i.needsHeight, i.measured]), [["M:1", "text_truncated", 40, true]]);
+    assert.deepStrictEqual([copies, removed], [3, 3], "every copy is removed, also when measuring throws");
+    assert.match(mt.textNotMeasured, /^1 text layers could not be measured/);
+    await figma.ui.onmessage({ setReadOnly: true });
+    await figma.ui.onmessage({ id: "m1", command: "audit_design", params: { node_id: "T:0", checks: ["layout"], measure_text: true } });
+    const ro = posted.find((m) => m.id === "m1").result;
+    assert.deepStrictEqual([copies, ro.issues.length], [3, 0], "no copies under Read-only; the estimate finds nothing here");
+    assert.match(ro.textNotMeasured, /Read-only is on/);
+    await figma.ui.onmessage({ setReadOnly: false });
+  }
+
   console.log("ALL OK");
 })().catch((e) => { console.error(e); process.exit(1); });

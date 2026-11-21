@@ -533,11 +533,30 @@ function inDisabledControl(n) {
 
 // Layers a finger is expected to hit: anything wired in the prototype, or
 // named like a control.
-const CONTROL_NAME = /\b(button|btn|link|tab|chip|checkbox|radio|switch|toggle|icon[-_ ]?button)\b/i;
+const CONTROL_NAME = /\b(button|btn|link|tab|chip|checkbox|radio|switch|toggle|icon[-_ ]?button|menu[-_ ]?item|nav[-_ ]?item)\b/i;
 
-function isControl(n) {
-  if ("reactions" in n && n.reactions && n.reactions.length) return true;
-  return (n.type === "INSTANCE" || n.type === "FRAME" || n.type === "COMPONENT") && CONTROL_NAME.test(n.name);
+// Icons that are a control by themselves when nothing bigger wraps them: the
+// x on a tag, the eye in a password field, row actions in a table. Chosen from
+// the small instances of a real product file; decorative icons (check-circle,
+// arrows inside buttons, menu glyphs) are not on the list or sit in a control.
+const ICON_ACTION = /(^|[\/\s_.-])(x|close|clear|trash|delete|remove|edit|eye|eye-slash|eye-off|copy|more|kebab|dots|menu|filter|sort|download|upload|refresh|settings|bell|notification|calendar|clock|search|back|arrow-left|chevron-left)([-_\s.]|icons?|$)/i;
+
+// Why a layer counts as something to tap, or null.
+function controlReason(n) {
+  if ("reactions" in n && n.reactions && n.reactions.length) return "prototype link";
+  if (n.type !== "INSTANCE" && n.type !== "FRAME" && n.type !== "COMPONENT") return null;
+  if (CONTROL_NAME.test(n.name)) return "name";
+  if (n.type === "INSTANCE" && ICON_ACTION.test(n.name)) return "action icon";
+  return null;
+}
+
+// An icon in a wrapper that is big enough and holds nothing else already has
+// its hit area: the wrapper.
+function paddedHitArea(n, min) {
+  const p = n.parent;
+  if (!p || !p.absoluteBoundingBox || !p.children) return false;
+  const b = p.absoluteBoundingBox;
+  return b.width >= min - EPS && b.height >= min - EPS && p.children.filter((c) => c.visible !== false).length === 1;
 }
 
 // "$2" in a batch op's params stands for the id of the node op 2 produced,
@@ -776,11 +795,15 @@ const handlers = {
       if (issues.length < max) issues.push(Object.assign({ id: n.id, name: n.name, issue }, detail));
     };
     let insideInstances = 0;
+    // measure_text clones text layers to measure them, which is a write: it is
+    // skipped, and said so, while Read-only is on.
+    const measure = !!params.measure_text && !readOnly;
+    const toMeasure = [];
     // clip: the visible window left by every clipping ancestor, or null.
     // inInstance: geometry inside an instance belongs to its component and
     // cannot be fixed on this screen (an icon's vector parts poking out of its
     // own frame), so only contrast and touch size are checked there.
-    const walk = (n, clip, parentCut, inInstance) => {
+    const walk = (n, clip, parentCut, inInstance, inControl) => {
       if (n.visible === false) return;
       const box = n.absoluteBoundingBox;
       if (!box) return;
@@ -816,8 +839,10 @@ const handlers = {
           // shortcut: half the font size per character is a lower bound on
           // width, so this only catches clear cases; measuring needs a clone,
           // and an audit must not touch the document.
-          if ((n.textTruncation === "ENDING" || n.textAutoResize === "TRUNCATE") &&
-              (n.characters || "").length * size * 0.5 > box.width * lines) {
+          const truncates = n.textTruncation === "ENDING" || n.textAutoResize === "TRUNCATE";
+          if (measure && (truncates || fixed) && (n.characters || "").length && toMeasure.length < 200) {
+            toMeasure.push(n);
+          } else if (truncates && (n.characters || "").length * size * 0.5 > box.width * lines) {
             report(n, "text_truncated", { text: n.characters.slice(0, 60) });
           }
         }
@@ -840,8 +865,11 @@ const handlers = {
           }
         }
       }
-      if (minTouch && isControl(n) && (box.width < minTouch - EPS || box.height < minTouch - EPS)) {
-        report(n, "small_touch_target", { width: Math.round(box.width), height: Math.round(box.height), required: minTouch });
+      // The outermost control is the tap target; what is inside it is not.
+      const why = minTouch && !inControl ? controlReason(n) : null;
+      if (why && (box.width < minTouch - EPS || box.height < minTouch - EPS) &&
+          !(why === "action icon" && paddedHitArea(n, minTouch))) {
+        report(n, "small_touch_target", { width: Math.round(box.width), height: Math.round(box.height), required: minTouch, because: why });
       }
       if (!("children" in n) || n.type === "BOOLEAN_OPERATION") return;
       let inner = clip;
@@ -849,12 +877,35 @@ const handlers = {
         inner = clip ? intersect(box, clip) : { x: box.x, y: box.y, width: box.width, height: box.height };
         inner.id = n.id;
       }
-      for (const c of n.children) walk(c, inner, cut, inInstance || n.type === "INSTANCE");
+      const within = inControl || !!controlReason(n);
+      for (const c of n.children) walk(c, inner, cut, inInstance || n.type === "INSTANCE", within);
     };
-    walk(root, null, false, root.type === "INSTANCE");
+    walk(root, null, false, root.type === "INSTANCE", false);
+    // Exact truncation: let a copy of the text grow to the height its content
+    // needs at the same width, compare, and remove the copy in the same step.
+    let unmeasured = 0;
+    for (const n of toMeasure) {
+      let copy = null;
+      try {
+        await Promise.all(n.getRangeAllFontNames(0, n.characters.length).map(figma.loadFontAsync));
+        copy = n.clone();
+        copy.textTruncation = "DISABLED";
+        copy.textAutoResize = "HEIGHT";
+        const need = copy.height, have = n.absoluteBoundingBox.height;
+        if (need > have + EPS) {
+          report(n, "text_truncated", { text: n.characters.slice(0, 60), needsHeight: Math.round(need), hasHeight: Math.round(have), measured: true });
+        }
+      } catch (e) {
+        unmeasured++;
+      } finally {
+        if (copy) copy.remove();
+      }
+    }
     const total = Object.keys(summary).reduce((a, k) => a + summary[k], 0);
     const out = { scope: root.name, checks: want.concat(minTouch ? ["touch"] : []), nodesChecked: checked, total, summary, issues };
     if (total > issues.length) out.truncated = true;
+    if (params.measure_text && !measure) out.textNotMeasured = "Read-only is on, so text was estimated, not measured (measure_text briefly adds and removes a copy of each text layer)";
+    else if (unmeasured) out.textNotMeasured = unmeasured + " text layers could not be measured (missing font or locked parent)";
     if (layout && insideInstances) out.layoutNotChecked = insideInstances + " layers inside instances; audit their main component to check those";
     if (disabledSkipped) out.contrastSkippedDisabled = disabledSkipped + " text layers in disabled controls (WCAG exempts them)";
     if (contrastUnknown) out.contrastNotMeasured = contrastUnknown + " text layers sit on an image, gradient or translucent fill; check those by screenshot";
