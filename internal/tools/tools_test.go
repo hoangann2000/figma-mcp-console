@@ -130,3 +130,27 @@ func TestLoadImageRefusesLocalAndHTTP(t *testing.T) {
 		t.Errorf("http: want refusal, got %v", err)
 	}
 }
+
+// A symlink inside the project must not lead reads or writes out of it.
+func TestResolveProjectPathRejectsSymlinkEscape(t *testing.T) {
+	outside := t.TempDir()
+	project := t.TempDir()
+	t.Chdir(project)
+	if err := os.Symlink(outside, filepath.Join(project, "assets")); err != nil {
+		t.Skip("symlinks unavailable:", err)
+	}
+	os.MkdirAll(filepath.Join(project, "real", "inner"), 0o755)
+	os.Symlink(filepath.Join(project, "real"), filepath.Join(project, "alias"))
+	os.Symlink(filepath.Join(outside, "secret.txt"), filepath.Join(project, "link.txt")) // dangling file link
+
+	for _, p := range []string{"assets/icon.svg", "assets/new/deep/icon.svg", "link.txt"} {
+		if _, err := resolveProjectPath(p); err == nil {
+			t.Errorf("%s leads outside the project and must be rejected", p)
+		}
+	}
+	for _, p := range []string{"alias/inner/x.svg", "not/yet/there.svg", "real/inner/x.svg"} {
+		if _, err := resolveProjectPath(p); err != nil {
+			t.Errorf("%s stays inside the project: %v", p, err)
+		}
+	}
+}

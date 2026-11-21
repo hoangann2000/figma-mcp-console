@@ -1357,8 +1357,33 @@ func resolveProjectPath(p string) (string, error) {
 	if filepath.IsAbs(p) {
 		dest = filepath.Clean(p)
 	}
-	rel, err := filepath.Rel(root, dest)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	escapes := func(base, target string) bool {
+		rel, err := filepath.Rel(base, target)
+		return err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	}
+	// The textual check alone lets a symlinked folder inside the project lead
+	// out of it, so compare the real locations too. The destination may not
+	// exist yet: resolve its nearest existing ancestor.
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", err
+	}
+	existing := dest
+	for {
+		if _, err := os.Lstat(existing); err == nil {
+			break
+		}
+		parent := filepath.Dir(existing)
+		if parent == existing {
+			break
+		}
+		existing = parent
+	}
+	realExisting, err := filepath.EvalSymlinks(existing)
+	if err != nil {
+		return "", fmt.Errorf("resolve %q: %w", p, err)
+	}
+	if escapes(root, dest) || escapes(realRoot, realExisting) {
 		return "", fmt.Errorf("path %q escapes the project directory %s; pass a path inside it, e.g. assets/icons/arrow.svg", p, root)
 	}
 	return dest, nil
