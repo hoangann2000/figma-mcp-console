@@ -6,6 +6,30 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-21
+
+### Upgrading from 0.8.x
+
+Re-import the Figma plugin: protocol 5 → 6.
+
+### Added
+
+- **`set_layout_child`** — how layers size and sit in their parent: `FILL` /
+  `HUG` / `FIXED` per axis, min and max sizes, `ABSOLUTE` positioning inside
+  auto layout, and constraints for frames without it. Until now the AI could
+  build auto layout but not make a child stretch with it. Errors say why a
+  value does not apply (FILL without an auto-layout parent, HUG on a shape).
+- **`set_node_properties`** — visibility, opacity, rotation, lock, and a
+  frame's clipping.
+- `set_auto_layout`: `layout_wrap` and `counter_axis_spacing` for rows that wrap.
+- **`create_section`**, placed in free space when no position is given.
+- **`update_style`** and **`remove_styles`**: edit a style's name,
+  description, color, font or effects in place, or delete it.
+- `set_text_properties`: `text_decoration` (underline, strikethrough) and
+  `text_case`.
+- `set_node_properties`: `description` for components and component sets.
+- Tool count: 65 → 70.
+
 ## [0.8.1] - 2026-11-21
 
 No plugin re-import needed: the protocol is unchanged.

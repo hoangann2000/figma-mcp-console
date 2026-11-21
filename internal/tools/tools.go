@@ -216,7 +216,37 @@ type textPropertiesArgs struct {
 	LineHeight    *float64 `json:"line_height,omitempty" jsonschema:"line height in pixels"`
 	LetterSpacing *float64 `json:"letter_spacing,omitempty" jsonschema:"letter spacing in pixels (may be negative)"`
 	TextAlign     string   `json:"text_align,omitempty" jsonschema:"LEFT, CENTER, RIGHT, or JUSTIFIED"`
+	TextDecor     string   `json:"text_decoration,omitempty" jsonschema:"NONE, UNDERLINE or STRIKETHROUGH"`
+	TextCase      string   `json:"text_case,omitempty" jsonschema:"ORIGINAL, UPPER, LOWER or TITLE"`
 	FillColor     string   `json:"fill_color,omitempty" jsonschema:"text color as hex, e.g. #111111"`
+}
+
+type sectionArgs struct {
+	fileArg
+	Name     string   `json:"name,omitempty" jsonschema:"section name"`
+	X        *float64 `json:"x,omitempty" jsonschema:"x position; omit x and y to place it in free space beside the page's content"`
+	Y        *float64 `json:"y,omitempty" jsonschema:"y position"`
+	Width    float64  `json:"width,omitempty" jsonschema:"width in pixels"`
+	Height   float64  `json:"height,omitempty" jsonschema:"height in pixels"`
+	ParentID string   `json:"parent_id,omitempty" jsonschema:"page or section to put it in (default: current page)"`
+}
+
+type updateStyleArgs struct {
+	fileArg
+	StyleID     string       `json:"style_id" jsonschema:"style to edit, id from get_local_styles"`
+	Name        string       `json:"name,omitempty" jsonschema:"new style name"`
+	Description *string      `json:"description,omitempty" jsonschema:"style description"`
+	Color       string       `json:"color,omitempty" jsonschema:"PAINT styles: new solid color as hex"`
+	Opacity     *float64     `json:"opacity,omitempty" jsonschema:"PAINT styles: paint opacity 0..1"`
+	FontFamily  string       `json:"font_family,omitempty" jsonschema:"TEXT styles: font family"`
+	FontStyle   string       `json:"font_style,omitempty" jsonschema:"TEXT styles: font style, e.g. Bold"`
+	FontSize    float64      `json:"font_size,omitempty" jsonschema:"TEXT styles: font size in pixels"`
+	Effects     []effectSpec `json:"effects,omitempty" jsonschema:"EFFECT styles: effects replacing the current ones"`
+}
+
+type removeStylesArgs struct {
+	fileArg
+	StyleIDs []string `json:"style_ids" jsonschema:"styles to delete, ids from get_local_styles"`
 }
 
 type combineVariantsArgs struct {
@@ -390,7 +420,34 @@ type autoLayoutArgs struct {
 	CounterAxisAlign  string   `json:"counter_axis_align,omitempty" jsonschema:"MIN, CENTER, MAX, or BASELINE"`
 	PrimaryAxisSizing string   `json:"primary_axis_sizing,omitempty" jsonschema:"FIXED or AUTO (hug contents)"`
 	CounterAxisSizing string   `json:"counter_axis_sizing,omitempty" jsonschema:"FIXED or AUTO (hug contents)"`
+	LayoutWrap        string   `json:"layout_wrap,omitempty" jsonschema:"WRAP so children flow onto new rows when they run out of width (HORIZONTAL only), or NO_WRAP"`
+	CounterAxisGap    *float64 `json:"counter_axis_spacing,omitempty" jsonschema:"gap between wrapped rows in pixels; needs layout_wrap WRAP"`
 	Verbose           bool     `json:"verbose,omitempty" jsonschema:"return the full node summary instead of just the id"`
+}
+
+type layoutChildArgs struct {
+	fileArg
+	nodeTarget
+	SizingHorizontal     string   `json:"sizing_horizontal,omitempty" jsonschema:"FIXED, HUG (shrink to content; auto-layout frames and text) or FILL (stretch to the parent; the parent must have auto layout)"`
+	SizingVertical       string   `json:"sizing_vertical,omitempty" jsonschema:"FIXED, HUG or FILL, as sizing_horizontal"`
+	Positioning          string   `json:"positioning,omitempty" jsonschema:"ABSOLUTE to take the layer out of its auto-layout parent's flow (a badge on a card's corner), AUTO to put it back"`
+	MinWidth             *float64 `json:"min_width,omitempty" jsonschema:"minimum width in pixels; 0 clears it"`
+	MaxWidth             *float64 `json:"max_width,omitempty" jsonschema:"maximum width in pixels; 0 clears it"`
+	MinHeight            *float64 `json:"min_height,omitempty" jsonschema:"minimum height in pixels; 0 clears it"`
+	MaxHeight            *float64 `json:"max_height,omitempty" jsonschema:"maximum height in pixels; 0 clears it"`
+	ConstraintHorizontal string   `json:"constraint_horizontal,omitempty" jsonschema:"for a layer in a frame without auto layout, what it keeps when the frame resizes: MIN (left), MAX (right), CENTER, STRETCH (both sides) or SCALE"`
+	ConstraintVertical   string   `json:"constraint_vertical,omitempty" jsonschema:"MIN (top), MAX (bottom), CENTER, STRETCH or SCALE"`
+}
+
+type nodePropertiesArgs struct {
+	fileArg
+	nodeTarget
+	Visible      *bool    `json:"visible,omitempty" jsonschema:"show or hide the layer"`
+	Opacity      *float64 `json:"opacity,omitempty" jsonschema:"layer opacity 0..1, applied to the layer and everything in it"`
+	Rotation     *float64 `json:"rotation,omitempty" jsonschema:"rotation in degrees, counter-clockwise"`
+	Locked       *bool    `json:"locked,omitempty" jsonschema:"lock or unlock the layer against edits on the canvas"`
+	ClipsContent *bool    `json:"clips_content,omitempty" jsonschema:"frames only: cut off children outside the frame's bounds, or let them show"`
+	Description  *string  `json:"description,omitempty" jsonschema:"components and component sets only: the description shown in the assets panel and to developers"`
 }
 
 type cornerRadiusArgs struct {
@@ -806,6 +863,9 @@ func Register(s *mcp.Server, b *bridge.Router) {
 			"A top-level frame is filled white and, when x and y are omitted, placed beside the existing frames; "+
 			"a frame nested in another has no fill unless fill_color is given.",
 		bridge.DefaultTimeout)
+	registerBridged[sectionArgs](s, b, "create_section",
+		"Create a section on a page, the labelled area files use to group related screens. Move frames into it with append_children.",
+		bridge.DefaultTimeout)
 	registerBridged[createShapeArgs](s, b, "create_rectangle",
 		"Create a new rectangle at the given position and size. Returns the created node's summary including its id.",
 		bridge.DefaultTimeout)
@@ -890,6 +950,12 @@ func Register(s *mcp.Server, b *bridge.Router) {
 	registerBridged[effectStyleArgs](s, b, "create_effect_style",
 		"Create a named effect style (shadows and blurs).",
 		bridge.DefaultTimeout)
+	registerBridged[updateStyleArgs](s, b, "update_style",
+		"Edit a local style in place (name, description, and its color, font or effects by style type); every layer using it follows.",
+		bridge.DefaultTimeout)
+	registerBridged[removeStylesArgs](s, b, "remove_styles",
+		"Delete local styles. Layers that used one keep the look it gave them.",
+		bridge.DefaultTimeout)
 	registerBridged[applyStyleArgs](s, b, "apply_style",
 		"Apply a local style to a node; PAINT styles go to the fill by default or the stroke via target.",
 		bridge.DefaultTimeout)
@@ -935,6 +1001,15 @@ func Register(s *mcp.Server, b *bridge.Router) {
 		bridge.DefaultTimeout)
 	registerBridged[autoLayoutArgs](s, b, "set_auto_layout",
 		"Set or remove auto-layout (flexbox-style) on a frame: direction, spacing, padding, alignment and sizing modes.",
+		bridge.DefaultTimeout)
+	registerBridged[layoutChildArgs](s, b, "set_layout_child",
+		"Set how layers size and sit inside their parent: FILL to stretch with an auto-layout parent, HUG to fit content, "+
+			"min/max sizes, ABSOLUTE positioning inside auto layout, and constraints for frames without auto layout. "+
+			"This is what makes a design resize properly: after set_auto_layout on a container, give the children that should "+
+			"grow sizing_horizontal FILL instead of a fixed width.",
+		bridge.DefaultTimeout)
+	registerBridged[nodePropertiesArgs](s, b, "set_node_properties",
+		"Show or hide layers, set their opacity or rotation, lock them, turn a frame's clipping on or off, or set a component's description.",
 		bridge.DefaultTimeout)
 	registerBridged[cornerRadiusArgs](s, b, "set_corner_radius",
 		"Set corner radius on a node, either uniform or per-corner.",
