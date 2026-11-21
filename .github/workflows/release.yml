@@ -1,34 +1,67 @@
 name: release
 
-# On pushing tag vX.Y.Z → package plugin/ into plugin.zip and create a GitHub Release.
-# (Binaries are distributed via npm; no build needed here.)
+# On pushing tag vX.Y.Z: test, build the six server binaries, publish to npm,
+# then package plugin/ into plugin.zip and create the GitHub Release.
+# npm authenticates this workflow by OIDC (npm "Trusted Publisher" set to this
+# repo and release.yml), so there is no npm token to store or leak.
 on:
   push:
     tags: ["v*"]
 
 permissions:
-  contents: write
+  contents: write # create the GitHub Release
+  id-token: write # npm trusted publishing (OIDC)
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest # trusted publishing does not support self-hosted runners
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the main-branch check below needs history
 
-      # A tag on broken code, or one that disagrees with the npm version, must not ship a plugin.
+      # A tag on broken code, or one that disagrees with the npm version, must not ship.
       - uses: actions/setup-go@v5
         with:
           go-version: stable
       - run: go vet ./...
       - run: go test -race ./...
       - run: node --check plugin/code.js
+      - run: node plugin/code.test.js
       - name: Tag must match npm/package.json
         run: test "${GITHUB_REF_NAME}" = "v$(node -p "require('./npm/package.json').version")"
+      - name: CHANGELOG must have a section for this version
+        run: grep -q "^## \[${GITHUB_REF_NAME#v}\]" CHANGELOG.md
+      - name: Tag must be on main
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+
+      # Trusted publishing needs npm 11.5.1+ on Node 22.14+.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+      - run: npm install -g npm@latest
+
+      - name: Build binaries and plugin copy
+        run: ./npm/build.sh
+
+      # Publish before the GitHub Release: a plugin.zip that speaks a newer
+      # protocol than the server on npm would show every user "Server outdated".
+      - name: Publish to npm
+        working-directory: npm
+        run: npm publish
 
       - name: Package Figma plugin
         run: cd plugin && zip -r ../plugin.zip .
 
+      # The release notes are this version's CHANGELOG section; an empty one
+      # means the changelog was not updated, and fails here before tagging users.
+      - name: Release notes from CHANGELOG
+        run: |
+          awk -v v="${GITHUB_REF_NAME#v}" '/^## \[/ { p = index($0, "[" v "]") > 0; next } p' CHANGELOG.md > release-notes.md
+          test -s release-notes.md
+
       - name: Create GitHub release with plugin.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release create "${GITHUB_REF_NAME}" plugin.zip --title "${GITHUB_REF_NAME}" --generate-notes
+        run: gh release create "${GITHUB_REF_NAME}" plugin.zip --title "${GITHUB_REF_NAME}" --notes-file release-notes.md
