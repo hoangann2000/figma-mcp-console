@@ -8,9 +8,9 @@ figma.showUI(__html__, { width: 280, height: 104 });
 // the bridge on every (re)connect so calls can be routed per file when
 // several files run the plugin at once. figma.fileKey needs
 // enablePrivatePluginApi in the manifest, so the file name stays the fallback.
-figma.ui.postMessage({
-  register: { key: figma.fileKey || undefined, name: figma.root.name },
-});
+// readOnly rides along so AI sees it in list_files before it plans an edit.
+const register = () =>
+  figma.ui.postMessage({ register: { key: figma.fileKey || undefined, name: figma.root.name, read_only: readOnly } });
 
 // ---------- helpers ----------
 
@@ -143,7 +143,9 @@ function nodeLink(id) {
 
 // compact drops defaults (visible, full opacity, empty fills) and renders
 // paints as hex: depth 1 on a 27-child frame is ~15k tokens otherwise.
-function serialize(n, depth, compact) {
+// visibleOnly drops hidden layers (and their subtrees): QC scripts would
+// otherwise report them as missing on the web.
+function serialize(n, depth, compact, visibleOnly) {
   const s = summarize(n);
   if (compact) {
     for (const k of ["x", "y", "width", "height"]) {
@@ -177,11 +179,107 @@ function serialize(n, depth, compact) {
     s.primaryAxisAlignItems = n.primaryAxisAlignItems;
     s.counterAxisAlignItems = n.counterAxisAlignItems;
   }
-  if ("children" in n && (!compact || n.children.length)) {
-    s.childCount = n.children.length;
-    if (depth > 0) s.children = n.children.map((c) => serialize(c, depth - 1, compact));
+  // Sizes auto layout computes (fill, hug) and layers pinned outside the flow,
+  // so diff_design reports only what the designer set. FIXED is the default, left out.
+  try {
+    if (n.layoutSizingHorizontal && n.layoutSizingHorizontal !== "FIXED") s.layoutSizingHorizontal = n.layoutSizingHorizontal;
+    if (n.layoutSizingVertical && n.layoutSizingVertical !== "FIXED") s.layoutSizingVertical = n.layoutSizingVertical;
+    if (n.layoutPositioning === "ABSOLUTE") s.layoutPositioning = "ABSOLUTE";
+  } catch (e) {}
+  // Designer notes and variant values; each getter can throw on node types or
+  // plans that lack it, which must not sink the whole tree.
+  try {
+    if ("annotations" in n && n.annotations.length) {
+      s.annotations = n.annotations.map((a) => ({
+        label: a.labelMarkdown || a.label || "",
+        properties: (a.properties || []).map((p) => p.type),
+      }));
+    }
+  } catch (e) {}
+  try {
+    if ((n.type === "INSTANCE" || n.type === "COMPONENT") && n.variantProperties) {
+      s.variant = n.variantProperties;
+    }
+  } catch (e) {}
+  if (n.type === "COMPONENT_SET") {
+    const opts = variantOptions(n);
+    if (opts) s.variantOptions = opts;
+  }
+  // Dashed vs solid borders, and the tokens/styles behind the raw values: ids
+  // here, swapped for names by resolveRefs once the (sync) walk is done.
+  if ("dashPattern" in n && n.dashPattern.length) s.dashPattern = n.dashPattern;
+  try {
+    if (n.boundVariables && Object.keys(n.boundVariables).length) s.boundVariables = Object.assign({}, n.boundVariables); // a copy: resolveRefs rewrites it
+  } catch (e) {}
+  for (const k of STYLE_KEYS) {
+    if (k in n && typeof n[k] === "string" && n[k]) s[k] = n[k];
+  }
+  // Text mixing fonts, sizes or colors (one bold word, a red asterisk) reads
+  // as "mixed" above; list the runs so nothing hides behind it.
+  if (n.type === "TEXT" && [n.fontName, n.fontSize, n.fills, n.textDecoration].includes(figma.mixed)) {
+    try {
+      s.segments = n.getStyledTextSegments(["fontName", "fontSize", "fills", "textDecoration"]).map((g) => {
+        const seg = { text: g.characters, font: g.fontName.family + " " + g.fontName.style, size: g.fontSize, fill: g.fills.map(paintBrief).join(", ") };
+        if (g.textDecoration !== "NONE") seg.decoration = g.textDecoration;
+        return seg;
+      });
+    } catch (e) {}
+  }
+  if ("children" in n) {
+    const kids = visibleOnly ? n.children.filter((c) => c.visible !== false) : n.children;
+    if (!compact || kids.length) {
+      s.childCount = kids.length;
+      if (depth > 0) s.children = kids.map((c) => serialize(c, depth - 1, compact, visibleOnly));
+    }
   }
   return s;
+}
+
+const STYLE_KEYS = ["fillStyleId", "strokeStyleId", "textStyleId", "effectStyleId"];
+
+// Replace variable and style ids in a serialized tree with their names
+// ("color/primary/500", "Heading/H1"), so a reader can match them to tokens.
+async function resolveRefs(root) {
+  const cache = new Map();
+  const name = async (id, style) => {
+    if (!cache.has(id)) {
+      let x = null;
+      try {
+        x = style ? await figma.getStyleByIdAsync(id) : await figma.variables.getVariableByIdAsync(id);
+      } catch (e) {}
+      cache.set(id, x ? x.name : id);
+    }
+    return cache.get(id);
+  };
+  const alias = async (v) =>
+    Array.isArray(v) ? Promise.all(v.map(alias)) : v && v.type === "VARIABLE_ALIAS" ? name(v.id) : v;
+  const walk = async (s) => {
+    if (s.boundVariables) {
+      for (const k of Object.keys(s.boundVariables)) s.boundVariables[k] = await alias(s.boundVariables[k]);
+    }
+    for (const k of STYLE_KEYS) {
+      if (s[k]) {
+        s[k.slice(0, -2)] = await name(s[k], true); // fillStyleId -> fillStyle
+        delete s[k];
+      }
+    }
+    if (s.children) for (const c of s.children) await walk(c);
+  };
+  await walk(root);
+  return root;
+}
+
+// {property: [values]} for a component set's variant properties, or null.
+function variantOptions(set) {
+  try {
+    const out = {};
+    for (const [k, d] of Object.entries(set.componentPropertyDefinitions)) {
+      if (d.type === "VARIANT") out[k.replace(/#.*$/, "")] = d.variantOptions || [];
+    }
+    return Object.keys(out).length ? out : null;
+  } catch (e) {
+    return null;
+  }
 }
 
 async function parentOf(params) {
@@ -250,8 +348,8 @@ function buildEffects(list) {
 }
 
 function applyShapeParams(n, params) {
-  n.x = params.x;
-  n.y = params.y;
+  n.x = params.x || 0;
+  n.y = params.y || 0;
   if (params.width > 0 && params.height > 0) n.resize(params.width, params.height);
   if (params.name) n.name = params.name;
   if (params.fill_color && params.fill_color !== "none") {
@@ -343,6 +441,128 @@ function pageOf(n) {
   return n;
 }
 
+
+// Right of everything already on the page, top-aligned with it.
+function placeInFreeSpace(n, page) {
+  const others = page.children.filter((c) => c !== n && "width" in c);
+  if (!others.length) return;
+  n.x = Math.max.apply(null, others.map((c) => c.x + c.width)) + 100;
+  n.y = Math.min.apply(null, others.map((c) => c.y));
+}
+
+// ---------- design audit ----------
+
+const EPS = 1; // sub-pixel noise from auto layout, rotation and vector bounds: never visible
+
+function intersect(a, b) {
+  const x = Math.max(a.x, b.x), y = Math.max(a.y, b.y);
+  const r = Math.min(a.x + a.width, b.x + b.width), bt = Math.min(a.y + a.height, b.y + b.height);
+  return { x, y, width: Math.max(0, r - x), height: Math.max(0, bt - y) };
+}
+
+// How far box a sticks out of box b, per side; null when it does not.
+function spill(a, b) {
+  const o = {
+    left: b.x - a.x, top: b.y - a.y,
+    right: a.x + a.width - (b.x + b.width), bottom: a.y + a.height - (b.y + b.height),
+  };
+  const out = {};
+  for (const k in o) if (o[k] > EPS) out[k] = Math.round(o[k] * 10) / 10;
+  return Object.keys(out).length ? out : null;
+}
+
+// Topmost visible paint: an {r,g,b} color when it is an opaque solid, "unknown"
+// for images, gradients and translucent fills (no single color to measure
+// against), null when the node paints nothing.
+function topFill(n) {
+  if (!("fills" in n) || !Array.isArray(n.fills)) return null;
+  for (let i = n.fills.length - 1; i >= 0; i--) {
+    const p = n.fills[i];
+    if (p.visible === false) continue;
+    if (p.type !== "SOLID" || (p.opacity !== undefined && p.opacity < 1) || ("opacity" in n && n.opacity < 1)) return "unknown";
+    return p.color;
+  }
+  return null;
+}
+
+// What a text layer is drawn on: the nearest thing behind it that paints,
+// either a sibling lower in the stack that covers it (the hand-drawn
+// "rectangle as background") or an ancestor's own fill.
+function backgroundOf(t) {
+  const box = t.absoluteBoundingBox;
+  for (let n = t; n.parent && n.parent.type !== "DOCUMENT"; n = n.parent) {
+    const sibs = n.parent.children || [];
+    for (let i = sibs.indexOf(n) - 1; i >= 0; i--) {
+      const s = sibs[i];
+      if (s.visible === false || !s.absoluteBoundingBox || spill(box, s.absoluteBoundingBox)) continue;
+      const f = topFill(s);
+      if (f) return f;
+    }
+    const f = n.parent.type === "PAGE" ? null : topFill(n.parent);
+    if (f) return f;
+  }
+  return "unknown";
+}
+
+// WCAG 2.x relative luminance and contrast ratio.
+function luminance(c) {
+  const f = (v) => (v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+  return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b);
+}
+
+function contrastRatio(a, b) {
+  const la = luminance(a), lb = luminance(b);
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+}
+
+// WCAG exempts inactive controls from contrast: text inside an instance whose
+// variant says Disabled (State=Disabled, Disabled=true, ...) is not measured.
+function inDisabledControl(n) {
+  for (let p = n.parent; p && p.type !== "PAGE"; p = p.parent) {
+    if (p.type !== "INSTANCE") continue;
+    let v = null;
+    try {
+      v = p.variantProperties;
+    } catch (e) {}
+    for (const k in v || {}) {
+      if (/^(disabled?|inactive)$/i.test(v[k]) || (/disabled/i.test(k) && /^(true|yes|on)$/i.test(v[k]))) return true;
+    }
+  }
+  return false;
+}
+
+// Layers a finger is expected to hit: anything wired in the prototype, or
+// named like a control.
+const CONTROL_NAME = /\b(button|btn|link|tab|chip|checkbox|radio|switch|toggle|icon[-_ ]?button)\b/i;
+
+function isControl(n) {
+  if ("reactions" in n && n.reactions && n.reactions.length) return true;
+  return (n.type === "INSTANCE" || n.type === "FRAME" || n.type === "COMPONENT") && CONTROL_NAME.test(n.name);
+}
+
+// "$2" in a batch op's params stands for the id of the node op 2 produced,
+// so a frame and its children can be created in one call.
+function resolveBatchRefs(v, results) {
+  if (Array.isArray(v)) return v.map((x) => resolveBatchRefs(x, results));
+  if (v && typeof v === "object") {
+    const out = {};
+    for (const k in v) out[k] = resolveBatchRefs(v[k], results);
+    return out;
+  }
+  const m = typeof v === "string" ? /^\$(\d+)$/.exec(v) : null;
+  if (!m) return v;
+  const r = results[+m[1]];
+  if (!r) throw new Error(v + " refers to an op that has not run yet; refs only point backwards");
+  const res = r.result || {};
+  const id = res.id || (res.ids && res.ids[0]) || (res.nodes && res.nodes[0] && res.nodes[0].id);
+  if (!id) throw new Error(v + " has no node id: op " + m[1] + (r.error ? " failed" : " did not return a node"));
+  return id;
+}
+
+// These carry megabytes of base64 or need the server's filesystem/network, so
+// they only work as their own tool call.
+const NOT_BATCHABLE = ["batch", "download_assets", "import_image", "get_screenshot"];
+
 // ---------- command handlers (names match MCP tool names) ----------
 
 const handlers = {
@@ -382,16 +602,217 @@ const handlers = {
 
   async get_design_context(params) {
     const depth = params.depth === undefined ? 2 : params.depth;
-    return serialize(await node(params.node_id), depth, !!params.compact);
+    return resolveRefs(serialize(await node(params.node_id), depth, !!params.compact, !!params.visible_only));
+  },
+
+  // Every component used under node_id, grouped by component (set), with all
+  // the states its set defines and the state each instance is in, so testers
+  // can write a case per state. Library components resolve too when Figma
+  // has their set loaded.
+  async get_component_states(params) {
+    const root = await node(params.node_id);
+    const instances = "findAllWithCriteria" in root ? root.findAllWithCriteria({ types: ["INSTANCE"] }) : [];
+    if (root.type === "INSTANCE") instances.unshift(root);
+    const groups = new Map();
+    for (const inst of instances) {
+      if (!inst.visible) continue;
+      const main = await inst.getMainComponentAsync();
+      if (!main) continue;
+      const set = main.parent && main.parent.type === "COMPONENT_SET" ? main.parent : null;
+      const owner = set || main;
+      let g = groups.get(owner.id);
+      if (!g) {
+        g = { component: owner.name, id: owner.id, library: !!main.remote, count: 0, used: [] };
+        if (set) {
+          const opts = variantOptions(set);
+          if (opts) g.states = opts;
+          else g.statesError = "variant list not readable";
+        }
+        groups.set(owner.id, g);
+      }
+      g.count++;
+      let state = null;
+      try {
+        state = inst.variantProperties;
+      } catch (e) {}
+      if (state) {
+        g.usedStates = g.usedStates || {};
+        for (const [k, v] of Object.entries(state)) {
+          const vals = (g.usedStates[k] = g.usedStates[k] || []);
+          if (!vals.includes(v)) vals.push(v);
+        }
+      }
+      if (g.used.length < 10) {
+        const u = { id: inst.id, name: inst.name };
+        if (state) u.state = state;
+        g.used.push(u);
+      }
+      // Hand edits on top of the component (a "Disabled" button recolored by
+      // hand) are what testers miss; list which layer and which fields.
+      let ovs = [];
+      try {
+        ovs = inst.overrides || [];
+      } catch (e) {}
+      if (ovs.length) {
+        g.overridden = (g.overridden || 0) + 1;
+        g.overrides = g.overrides || [];
+        if (g.overrides.length < 10) {
+          const layers = [];
+          for (const o of ovs) {
+            const n = o.id === inst.id ? inst : await figma.getNodeByIdAsync(o.id);
+            layers.push({ layer: n ? n.name : o.id, fields: o.overriddenFields });
+          }
+          g.overrides.push({ id: inst.id, name: inst.name, layers });
+        }
+      }
+    }
+    return [...groups.values()].sort((a, b) => b.count - a.count);
   },
 
   async create_frame(params) {
     const f = figma.createFrame();
-    // Figma's default white fill stays unless the caller opts out.
-    if (params.fill_color === "none") f.fills = [];
+    const parent = await parentOf(params);
+    const topLevel = parent.type === "PAGE" || parent.type === "SECTION";
+    // A frame inside another is almost always a layout wrapper, and Figma's
+    // white default turns every wrapper into a white slab over the design.
+    // Top-level frames are screens and keep it.
+    if (params.fill_color === "none" || (!params.fill_color && !topLevel)) f.fills = [];
     applyShapeParams(f, params);
-    (await parentOf(params)).appendChild(f);
+    parent.appendChild(f);
+    // A screen created without a position goes beside the existing work
+    // instead of on top of it at 0,0.
+    if (parent.type === "PAGE" && params.x == null && params.y == null) placeInFreeSpace(f, parent);
     return summarize(f);
+  },
+
+  // Findings only: what a screenshot shows but a model reading it tends to
+  // miss. Reads the rendered geometry, never changes the document.
+  async audit_design(params) {
+    const root = await node(params.node_id);
+    if (!root.absoluteBoundingBox) throw new Error("node " + root.id + " is " + root.type + " and has no box to audit; pass a frame, section or component");
+    const want = params.checks && params.checks.length ? params.checks : ["layout", "contrast"];
+    for (const c of want) {
+      if (["layout", "contrast"].indexOf(c) === -1) throw new Error("unknown check: " + c + " (use layout, contrast)");
+    }
+    const layout = want.indexOf("layout") !== -1, contrast = want.indexOf("contrast") !== -1;
+    const minTouch = params.min_touch > 0 ? params.min_touch : 0;
+    const max = params.max_results || 100;
+    const issues = [], summary = {};
+    let checked = 0, contrastUnknown = 0, disabledSkipped = 0;
+    const report = (n, issue, detail) => {
+      summary[issue] = (summary[issue] || 0) + 1;
+      if (issues.length < max) issues.push(Object.assign({ id: n.id, name: n.name, issue }, detail));
+    };
+    let insideInstances = 0;
+    // clip: the visible window left by every clipping ancestor, or null.
+    // inInstance: geometry inside an instance belongs to its component and
+    // cannot be fixed on this screen (an icon's vector parts poking out of its
+    // own frame), so only contrast and touch size are checked there.
+    const walk = (n, clip, parentCut, inInstance) => {
+      if (n.visible === false) return;
+      const box = n.absoluteBoundingBox;
+      if (!box) return;
+      checked++;
+      let cut = parentCut;
+      if (inInstance) insideInstances++;
+      if (layout && n !== root && !inInstance) {
+        const seen = clip ? intersect(box, clip) : box;
+        if (clip && !parentCut && (seen.width <= EPS || seen.height <= EPS)) {
+          // Nothing of it shows, so nothing inside it is worth reporting.
+          report(n, "hidden_by_clip", { clippedBy: clip.id });
+          return;
+        }
+        const over = clip && !parentCut ? spill(box, clip) : null;
+        if (over) {
+          report(n, "clipped", { clippedBy: clip.id, cutOff: over });
+          cut = true;
+        } else if (n.parent && n.parent.absoluteBoundingBox && n.parent.type !== "GROUP" && !parentCut) {
+          const out = spill(box, n.parent.absoluteBoundingBox);
+          if (out) report(n, "overflows_parent", { parent: n.parent.id, by: out });
+        }
+      }
+      if (n.type === "TEXT") {
+        if (layout && !inInstance) {
+          // A fixed-size text box does not grow with its content: the glyphs
+          // either spill out of it or are cut with an ellipsis.
+          const rb = n.absoluteRenderBounds;
+          const fixed = n.textAutoResize === "NONE" || n.textAutoResize === "TRUNCATE";
+          const out = fixed && rb ? spill(rb, box) : null;
+          if (out && (out.right || out.bottom)) report(n, "text_overflows_box", { by: out });
+          const size = typeof n.fontSize === "number" ? n.fontSize : 14;
+          const lines = n.maxLines > 0 ? n.maxLines : Math.max(1, Math.floor(box.height / (size * 1.2)));
+          // shortcut: half the font size per character is a lower bound on
+          // width, so this only catches clear cases; measuring needs a clone,
+          // and an audit must not touch the document.
+          if ((n.textTruncation === "ENDING" || n.textAutoResize === "TRUNCATE") &&
+              (n.characters || "").length * size * 0.5 > box.width * lines) {
+            report(n, "text_truncated", { text: n.characters.slice(0, 60) });
+          }
+        }
+        if (contrast && (n.characters || "").trim()) {
+          const fg = topFill(n), bg = fg && fg !== "unknown" ? backgroundOf(n) : "unknown";
+          if (!fg || inDisabledControl(n)) {
+            // paints nothing, or a disabled control's label: exempt
+            if (fg) disabledSkipped++;
+          } else if (fg === "unknown" || bg === "unknown") {
+            contrastUnknown++;
+          } else {
+            const size = typeof n.fontSize === "number" ? n.fontSize : 0;
+            const bold = n.fontName && n.fontName !== figma.mixed && /bold|black|heavy/i.test(n.fontName.style || "");
+            // WCAG AA: 3:1 for large text (24px, or 18.66px bold), else 4.5:1.
+            const need = size >= 24 || (bold && size >= 18.66) ? 3 : 4.5;
+            const ratio = contrastRatio(fg, bg);
+            if (ratio < need) {
+              report(n, "low_contrast", { ratio: Math.round(ratio * 100) / 100, required: need, text: rgbToHex(fg), background: rgbToHex(bg) });
+            }
+          }
+        }
+      }
+      if (minTouch && isControl(n) && (box.width < minTouch - EPS || box.height < minTouch - EPS)) {
+        report(n, "small_touch_target", { width: Math.round(box.width), height: Math.round(box.height), required: minTouch });
+      }
+      if (!("children" in n) || n.type === "BOOLEAN_OPERATION") return;
+      let inner = clip;
+      if (n.clipsContent) {
+        inner = clip ? intersect(box, clip) : { x: box.x, y: box.y, width: box.width, height: box.height };
+        inner.id = n.id;
+      }
+      for (const c of n.children) walk(c, inner, cut, inInstance || n.type === "INSTANCE");
+    };
+    walk(root, null, false, root.type === "INSTANCE");
+    const total = Object.keys(summary).reduce((a, k) => a + summary[k], 0);
+    const out = { scope: root.name, checks: want.concat(minTouch ? ["touch"] : []), nodesChecked: checked, total, summary, issues };
+    if (total > issues.length) out.truncated = true;
+    if (layout && insideInstances) out.layoutNotChecked = insideInstances + " layers inside instances; audit their main component to check those";
+    if (disabledSkipped) out.contrastSkippedDisabled = disabledSkipped + " text layers in disabled controls (WCAG exempts them)";
+    if (contrastUnknown) out.contrastNotMeasured = contrastUnknown + " text layers sit on an image, gradient or translucent fill; check those by screenshot";
+    return out;
+  },
+
+  // Several commands in one round-trip. A failed op is reported in place and
+  // the rest still run: what already landed in the document stays there.
+  async batch(params) {
+    const ops = params.ops || [];
+    if (!ops.length) throw new Error("ops is required");
+    const results = [];
+    let failed = 0;
+    for (let i = 0; i < ops.length; i++) {
+      const op = ops[i] || {};
+      try {
+        if (NOT_BATCHABLE.indexOf(op.command) !== -1) throw new Error(op.command + " cannot run inside batch; call it as its own tool");
+        const h = handlers[op.command];
+        if (!h) throw new Error("unknown command: " + op.command + " (batch runs the same commands as the other tools, by tool name)");
+        const r = await h(resolveBatchRefs(op.params || {}, results));
+        results.push({ result: r === undefined ? null : r });
+      } catch (e) {
+        failed++;
+        results.push({ error: String((e && e.message) || e) });
+        if (params.stop_on_error) break;
+      }
+    }
+    const out = { ok: failed === 0, ran: results.length, failed, results };
+    if (results.length < ops.length) out.skipped = ops.length - results.length;
+    return out;
   },
 
   async create_rectangle(params) {
@@ -661,6 +1082,7 @@ const handlers = {
           let scale = item.scale || 1;
           scale = Math.max(0.5, Math.min(scale, 4));
           settings = { format, constraint: { type: "SCALE", value: scale } };
+          if (item.exact) settings.useAbsoluteBounds = true;
         } else {
           throw new Error("unsupported format: " + format + " (use PNG, JPG or SVG)");
         }
@@ -1202,7 +1624,7 @@ async function postSelection() {
   const sel = figma.currentPage.selection;
   const items = [];
   for (const n of sel) {
-    const item = { name: n.name, type: n.type, link: nodeLink(n.id) };
+    const item = { id: n.id, name: n.name, type: n.type, link: nodeLink(n.id) };
     // Frames are copied as links; every other element (vectors, instances, …)
     // is copied as SVG, so pre-export it now to keep the UI copy synchronous
     // (clipboard writes must happen inside the click gesture). Skip huge
@@ -1218,26 +1640,67 @@ async function postSelection() {
     items.push(item);
   }
   figma.ui.postMessage({ selection: items });
-  // Room for: base card + optional Copy-all header (22) + up to 6 visible rows
-  // (the list scrolls beyond that).
-  const rows = Math.min(items.length, 6);
-  const h = 104 + (items.length > 1 ? 22 : 0) + rows * 30;
-  figma.ui.resize(280, h);
 }
 figma.on("selectionchange", postSelection);
 postSelection();
+
+// ---------- activity log clicks ----------
+
+async function uiAction(msg) {
+  if (msg.uiAction !== "select") throw new Error("unknown action: " + msg.uiAction);
+  const n = await node(msg.nodeId);
+  figma.currentPage.selection = [n];
+  figma.viewport.scrollAndZoomIntoView([n]);
+  return null;
+}
+
+// ---------- read-only switch ----------
+// Commands that leave the document as it is (selection and the open page are
+// view state). With the switch on, everything else is refused, so a tester can
+// let AI read a file it must not change. On at every start and never
+// remembered, so AI edits only while the user has this window unlocked.
+const READ_COMMANDS = /^(get_|list_|find_|audit_|download_assets$|set_selection$|set_current_page$)/;
+let readOnly = true;
+register();
+// Checkpoint buttons are for people who can edit this file. Dev Mode and
+// view-only windows (should the plugin ever run there) do not get them.
+figma.ui.postMessage({ canEdit: figma.editorType === "figma" && figma.mode !== "inspect" });
 
 // ---------- dispatch ----------
 
 figma.ui.onmessage = async (msg) => {
   if (!msg) return;
+  // The window measures its content after every render.
+  if (msg.resize) {
+    figma.ui.resize(280, Math.max(104, Math.min(600, Math.round(msg.resize))));
+    return;
+  }
+  if (msg.uiAction) {
+    // A log row whose layer was deleted since: nothing to select.
+    await uiAction(msg).catch(() => {});
+    return;
+  }
+  if (msg.setReadOnly !== undefined) {
+    readOnly = !!msg.setReadOnly;
+    register();
+    return;
+  }
   if (!msg.id || !msg.command) return;
   const h = handlers[msg.command];
+  const p = msg.params || {};
+  const act = { command: msg.command, write: !READ_COMMANDS.test(msg.command), node: p.node_id || (p.node_ids && p.node_ids[0]) || null };
   try {
     if (!h) throw new Error("unknown command: " + msg.command);
-    const result = await h(msg.params || {});
+    if (readOnly && act.write) {
+      figma.notify("AI tried to edit this file (" + msg.command + ") and was blocked. Untick Read-only in Figma MCP Console to allow edits.", { timeout: 8000 });
+      throw new Error(msg.command + " was blocked: read-only mode is on in this file's Figma MCP Console window. " +
+        "Tell the user; they can turn it off there if the edit is intended.");
+    }
+    const result = await h(p);
     figma.ui.postMessage({ id: msg.id, result: result === undefined ? null : result });
   } catch (e) {
-    figma.ui.postMessage({ id: msg.id, error: String((e && e.message) || e) });
+    act.error = String((e && e.message) || e);
+    figma.ui.postMessage({ id: msg.id, error: act.error });
   }
+  figma.ui.postMessage({ activity: act });
 };

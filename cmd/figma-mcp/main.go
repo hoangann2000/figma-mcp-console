@@ -63,7 +63,6 @@ func main() {
 		project = filepath.Base(cwd)
 	}
 	r := bridge.NewRouter(project, version, *port)
-	go r.Run()
 
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "figma-console",
@@ -71,6 +70,8 @@ func main() {
 		Version: version,
 	}, nil)
 	tools.Register(server, r)
+	// After Register: it gives the router its plugin hook, read when the bridge starts.
+	go r.Run()
 	tools.RegisterPrompts(server)
 
 	if err := server.Run(context.Background(), &mcp.StdioTransport{}); err != nil {

@@ -49,6 +49,12 @@ type Response struct {
 type FileInfo struct {
 	Key  string `json:"key,omitempty"`
 	Name string `json:"name"`
+	// ReadOnly mirrors the plugin window's switch: while set, the plugin
+	// refuses every command that would change the file.
+	ReadOnly bool `json:"read_only"`
+	// Protocol is the plugin build's wire protocol. Plugins before 0.6.0 do
+	// not send it, which reads as 0: older than any server.
+	Protocol int `json:"protocol,omitempty"`
 }
 
 // pluginFrame is anything a plugin may send: a command response, or a
@@ -58,7 +64,15 @@ type pluginFrame struct {
 	Result   json.RawMessage `json:"result"`
 	Error    string          `json:"error"`
 	Register *FileInfo       `json:"register"`
+	// Checkpoint is a request the plugin window makes of the server (its
+	// checkpoint buttons), answered with a checkpointResult frame.
+	Checkpoint json.RawMessage `json:"checkpoint"`
 }
+
+// PluginHook answers a request made by a plugin window. call runs a command
+// in that same window, e.g. to read the node the request is about.
+type PluginHook func(ctx context.Context, file FileInfo, req json.RawMessage,
+	call func(command string, params any) (json.RawMessage, error)) any
 
 // ProtocolVersion is the plugin↔server wire-protocol version. The plugin
 // (ui.html) carries a matching constant and warns in its status line when the
@@ -66,7 +80,7 @@ type pluginFrame struct {
 // server is diagnosed up front instead of failing later with a cryptic
 // "unknown command". Bump it on any breaking change to the command set or
 // message shape the plugin must understand.
-const ProtocolVersion = 2
+const ProtocolVersion = 3
 
 // Keepalive tuning for plugin connections. A dead Figma window (asleep,
 // crashed tab, sleeping machine) may never send a TCP FIN, so the owner
@@ -188,7 +202,11 @@ type Bridge struct {
 	project  string
 	version  string
 	port     int
+	hook     PluginHook
 }
+
+// SetPluginHook sets who answers requests made by plugin windows.
+func (b *Bridge) SetPluginHook(h PluginHook) { b.hook = h }
 
 func New() *Bridge {
 	return &Bridge{
@@ -262,8 +280,16 @@ func (b *Bridge) closeAll() {
 }
 
 func (b *Bridge) handlePlugin(w http.ResponseWriter, r *http.Request) {
-	// The plugin iframe has a null/opaque origin, so origin verification must
-	// be skipped; this is safe because we only bind to loopback.
+	// The plugin iframe has an opaque origin ("null"), which the library's
+	// same-host check can't express, so check here: any real web page sends
+	// its own origin and must not pose as a plugin. A sandboxed iframe on a
+	// hostile page also sends "null"; this raises the bar, it is not auth.
+	switch r.Header.Get("Origin") {
+	case "", "null", "https://www.figma.com", "https://figma.com":
+	default:
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
 	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
 	if err != nil {
 		log.Printf("bridge: plugin accept failed: %v", err)
@@ -362,6 +388,24 @@ func (b *Bridge) readPlugin(pc *pluginConn) {
 			pc.info = *f.Register
 			pc.mu.Unlock()
 			log.Printf("bridge: plugin registered file %q", f.Register.Name)
+			continue
+		}
+		if len(f.Checkpoint) > 0 {
+			if b.hook != nil {
+				// Own goroutine: the hook calls back into this window, and
+				// this loop must keep reading to deliver that answer.
+				go func(req json.RawMessage) {
+					file := pc.file()
+					ref := file.Key
+					if ref == "" {
+						ref = file.Name
+					}
+					res := b.hook(ctx, file, req, func(command string, params any) (json.RawMessage, error) {
+						return b.CallFile(ctx, ref, command, params, DefaultTimeout)
+					})
+					_ = pc.write(ctx, map[string]any{"checkpointResult": res})
+				}(f.Checkpoint)
+			}
 			continue
 		}
 		if f.ID == "" {
@@ -512,7 +556,17 @@ func (b *Bridge) CallFile(ctx context.Context, file, command string, params any,
 	select {
 	case resp := <-ch:
 		if resp.Error != "" {
-			return nil, errors.New(resp.Error)
+			msg := resp.Error
+			// An outdated plugin answers new commands with "unknown command"
+			// and new arguments with type errors; neither tells the AI what
+			// the user has to do.
+			if p := pc.file().Protocol; p < ProtocolVersion {
+				msg += fmt.Sprintf(" — the Figma MCP Console plugin in %q is outdated (protocol %d, server %d), "+
+					"so commands added since may fail: tell the user to re-import the plugin from the latest release "+
+					"(github.com/hoangann2000/figma-mcp-console/releases/latest) and run it again",
+					pc.label(), p, ProtocolVersion)
+			}
+			return nil, errors.New(msg)
 		}
 		return resp.Result, nil
 	case <-ctx.Done():

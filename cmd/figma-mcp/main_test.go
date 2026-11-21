@@ -58,8 +58,16 @@ func TestEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list tools: %v", err)
 	}
-	if n := len(tools.Tools); n != 54 {
-		t.Errorf("want 54 tools, got %d", n)
+	if n := len(tools.Tools); n != 59 {
+		t.Errorf("want 59 tools, got %d", n)
+	}
+
+	prompts, err := session.ListPrompts(ctx, nil)
+	if err != nil {
+		t.Fatalf("list prompts: %v", err)
+	}
+	if n := len(prompts.Prompts); n != 1 {
+		t.Errorf("want 1 prompt (QC workflows live in qc-kit), got %d", n)
 	}
 
 	// Before the plugin connects: friendly error, not a timeout. The bridge

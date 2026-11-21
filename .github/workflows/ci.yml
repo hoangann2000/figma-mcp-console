@@ -22,3 +22,5 @@ jobs:
           node --check plugin/code.js
           awk '/<script>/{f=1;next}/<\/script>/{f=0}f' plugin/ui.html > "$RUNNER_TEMP/ui.js"
           node --check "$RUNNER_TEMP/ui.js"
+      - name: Plugin handler self-check
+        run: node plugin/code.test.js

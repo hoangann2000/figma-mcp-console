@@ -3,10 +3,14 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
+	_ "image/jpeg" // image.DecodeConfig for download_assets
+	_ "image/png"
 	"io"
 	"net/http"
 	"os"
@@ -78,18 +82,62 @@ type nodeInfoArgs struct {
 	fileArg
 	NodeID  string `json:"node_id" jsonschema:"Figma node ID, e.g. \"12:34\""`
 	Depth   int    `json:"depth,omitempty" jsonschema:"how many levels of children to include (default 2)"`
-	Compact bool   `json:"compact,omitempty" jsonschema:"colors as hex and defaults omitted; use this first, the full form costs several thousand tokens per frame"`
+	Compact bool   `json:"compact,omitempty" jsonschema:"colors as hex and defaults omitted; use it to read a design, omit it when a script needs raw paint objects"`
+	// VisibleOnly is applied by the plugin; Out is handled here.
+	VisibleOnly bool   `json:"visible_only,omitempty" jsonschema:"leave out hidden layers and their children"`
+	Out         string `json:"out,omitempty" jsonschema:"save the JSON to this file path inside the project instead of returning it, e.g. testing/login/figma-src/original-1440.json"`
+}
+
+type diffDesignArgs struct {
+	fileArg
+	NodeID   string `json:"node_id" jsonschema:"frame to compare, e.g. \"12:34\""`
+	Baseline string `json:"baseline,omitempty" jsonschema:"omit to use the checkpoint the user saved from the plugin window. Or a snapshot path inside the project, e.g. testing/login/design/12-34.json.gz; created on the first run, gzip-compressed when the path ends in .gz (about 20x smaller)"`
+	Update   bool   `json:"update,omitempty" jsonschema:"after comparing, replace the baseline with the current design so the next run compares against today"`
+}
+
+// scanArgs targets one frame or section to read through.
+type scanArgs struct {
+	fileArg
+	NodeID string `json:"node_id" jsonschema:"frame or section to scan, e.g. \"12:34\""`
 }
 
 type createShapeArgs struct {
 	fileArg
-	Name      string  `json:"name,omitempty" jsonschema:"layer name"`
-	X         float64 `json:"x" jsonschema:"x position in the parent's coordinates"`
-	Y         float64 `json:"y" jsonschema:"y position in the parent's coordinates"`
-	Width     float64 `json:"width" jsonschema:"width in pixels"`
-	Height    float64 `json:"height" jsonschema:"height in pixels"`
-	FillColor string  `json:"fill_color,omitempty" jsonschema:"solid fill as hex, e.g. #1E90FF, or \"none\" for no fill (frames default to white)"`
-	ParentID  string  `json:"parent_id,omitempty" jsonschema:"node ID to append into (default: current page)"`
+	Name string `json:"name,omitempty" jsonschema:"layer name"`
+	// Pointers so "not given" reaches the plugin: create_frame places a screen
+	// in free space only when the caller named no position.
+	X         *float64 `json:"x,omitempty" jsonschema:"x position in the parent's coordinates (default 0). For a new top-level frame, omit x and y to place it in free space beside the existing frames instead of on top of them"`
+	Y         *float64 `json:"y,omitempty" jsonschema:"y position in the parent's coordinates (default 0)"`
+	Width     float64  `json:"width" jsonschema:"width in pixels"`
+	Height    float64  `json:"height" jsonschema:"height in pixels"`
+	FillColor string   `json:"fill_color,omitempty" jsonschema:"solid fill as hex, e.g. #1E90FF, or \"none\" for no fill. Default for frames: white at the top level (a screen), no fill when nested in another frame (a layout wrapper)"`
+	ParentID  string   `json:"parent_id,omitempty" jsonschema:"node ID to append into (default: current page)"`
+}
+
+type auditArgs struct {
+	fileArg
+	NodeID     string   `json:"node_id" jsonschema:"frame, section or component to audit, e.g. \"12:34\""`
+	Checks     []string `json:"checks,omitempty" jsonschema:"which checks to run: layout, contrast (default: both)"`
+	MinTouch   float64  `json:"min_touch,omitempty" jsonschema:"also report controls smaller than this many pixels on either side, e.g. 44 for a mobile screen. Off by default: desktop designs fail it by design"`
+	MaxResults int      `json:"max_results,omitempty" jsonschema:"maximum findings to list (default 100); the summary always counts all of them"`
+}
+
+type batchOp struct {
+	Command string         `json:"command" jsonschema:"tool name to run, e.g. create_frame, create_text, set_auto_layout"`
+	Params  map[string]any `json:"params,omitempty" jsonschema:"that tool's arguments, minus file. Any string value \"$N\" is replaced by the id of the node op N produced (0-based), e.g. parent_id: \"$0\""`
+}
+
+type batchArgs struct {
+	fileArg
+	Ops         []batchOp `json:"ops" jsonschema:"commands to run in order"`
+	StopOnError bool      `json:"stop_on_error,omitempty" jsonschema:"stop at the first failed op instead of running the rest. What already ran is kept either way"`
+}
+
+type exportTokensArgs struct {
+	fileArg
+	Format string `json:"format,omitempty" jsonschema:"css (default): custom properties, the default mode under :root and every other mode under [data-theme=\"<mode>\"]. json: a W3C design-tokens tree ($type/$value) for one mode"`
+	Mode   string `json:"mode,omitempty" jsonschema:"export only this mode, by name, e.g. dark (default: every mode for css, each collection's default mode for json)"`
+	Out    string `json:"out,omitempty" jsonschema:"save to this file path inside the project instead of returning it, e.g. src/styles/tokens.css"`
 }
 
 type createTextArgs struct {
@@ -344,6 +392,9 @@ type downloadItem struct {
 	Path   string  `json:"path,omitempty" jsonschema:"destination file path relative to the project directory. Omit it to use the defaults: assets/icons/<layer-name>.svg for SVG, assets/images/<layer-name>.<ext> for PNG/JPG. Set it only when the user or the project's asset conventions specify a destination, e.g. public/icons/arrow-right.svg"`
 	Format string  `json:"format,omitempty" jsonschema:"SVG, PNG, or JPG (default: from the path extension, else PNG). SVG only suits pure vector nodes; use PNG when the node has IMAGE fills or blur/shadow effects"`
 	Scale  float64 `json:"scale,omitempty" jsonschema:"export scale 0.5..4 for PNG/JPG (default 1)"`
+	// Figma otherwise crops to what is drawn: a text layer comes out cut
+	// tight around its glyphs, smaller than its box.
+	ExactBounds bool `json:"exact_bounds,omitempty" jsonschema:"export exactly the node's box (width x height x scale), empty space included and anything drawn outside it, such as a shadow, cut off. Use it when the image is compared pixel by pixel against the node; leave it off for assets"`
 }
 
 type downloadArgs struct {
@@ -496,13 +547,51 @@ type screenshotResult struct {
 	SourceHeight float64 `json:"sourceHeight"`
 }
 
+// connectedFile resolves a tool's file argument the way the bridge routes it:
+// the only connected file, else a key or exact name, else a unique substring.
+func connectedFile(ctx context.Context, b *bridge.Router, ref string) (bridge.FileInfo, error) {
+	files, err := b.Files(ctx)
+	if err != nil {
+		return bridge.FileInfo{}, err
+	}
+	if len(files) == 0 {
+		return bridge.FileInfo{}, bridge.ErrNotConnected
+	}
+	want := strings.ToLower(strings.TrimSpace(ref))
+	if want == "" && len(files) == 1 {
+		return files[0], nil
+	}
+	var exact, partial []bridge.FileInfo
+	for _, f := range files {
+		key, name := strings.ToLower(f.Key), strings.ToLower(f.Name)
+		switch {
+		case want == "":
+		case key == want || name == want:
+			exact = append(exact, f)
+		case strings.Contains(name, want):
+			partial = append(partial, f)
+		}
+	}
+	if len(exact) == 0 {
+		exact = partial
+	}
+	if len(exact) != 1 {
+		return bridge.FileInfo{}, fmt.Errorf("pass the file parameter to choose one connected Figma file (see list_files)")
+	}
+	return exact[0], nil
+}
+
 // Register adds all Figma tools to the MCP server.
 func Register(s *mcp.Server, b *bridge.Router) {
+	b.SetPluginHook(checkpointHook)
 	// list_files is answered by the bridge itself, not a plugin.
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "list_files",
 		Description: "List the Figma files currently connected to the bridge (one per open plugin window). " +
-			"When several files are connected, pass one of the returned names as the file parameter of the other tools.",
+			"When several files are connected, pass one of the returned names as the file parameter of the other tools. " +
+			"read_only: true means the user has Read-only ticked in that file's plugin window and every edit will be " +
+			"refused: before a task that changes the design, call this first and, if it is read-only, ask the user to " +
+			"untick it instead of starting the work.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
 		files, err := b.Files(ctx)
 		if err != nil {
@@ -536,12 +625,136 @@ func Register(s *mcp.Server, b *bridge.Router) {
 			"Each item also carries a shareable figma.com link to that frame/section when the file is saved to Figma, "+
 			"so selecting several frames returns their names paired with links.",
 		bridge.DefaultTimeout)
-	registerBridged[nodeInfoArgs](s, b, "get_design_context",
-		"Get detailed information about a node (geometry, fills, text content) including its children up to the given depth. "+
-			"Pass compact: true unless you need raw paint objects — the full form runs to several thousand tokens for one frame.",
+	// get_design_context can save its result to a file, so it can't use
+	// registerBridged.
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "get_design_context",
+		Description: "Get detailed information about a node (geometry, fills, text content, designer annotations, " +
+			"variant values, the variable and style names behind its values, dashed borders, and the runs of text " +
+			"that mixes fonts, sizes or colors) including its children up to the given depth. Coordinates are relative to the parent. " +
+			"To read a design, pass compact: true (colors as hex, defaults omitted; the full form runs to several " +
+			"thousand tokens per frame). Omit compact when a script will parse the result, since scripts expect raw " +
+			"paint objects. Pass out to save the JSON to a project file instead of returning it, and visible_only to " +
+			"drop hidden layers.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args nodeInfoArgs) (*mcp.CallToolResult, any, error) {
+		var dest string
+		if args.Out != "" {
+			var err error
+			if dest, err = resolveProjectPath(args.Out); err != nil {
+				return nil, nil, err
+			}
+		}
+		raw, err := b.Call(ctx, args.File, "get_design_context", args, bridge.DefaultTimeout)
+		if err != nil {
+			return nil, nil, err
+		}
+		text := string(raw)
+		if dest != "" {
+			if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+				return nil, nil, fmt.Errorf("create directory: %w", err)
+			}
+			if err := os.WriteFile(dest, raw, 0o644); err != nil {
+				return nil, nil, fmt.Errorf("write file: %w", err)
+			}
+			text = fmt.Sprintf("Saved node %s (%d nodes, %d bytes) to %s", args.NodeID, strings.Count(text, `"parentId":`), len(raw), dest)
+		}
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: text}},
+		}, nil, nil
+	})
+	// diff_design reads and writes snapshot files, so it lives here.
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "diff_design",
+		Description: "Find what changed in a frame since a saved snapshot: layers added, removed, or changed in text, " +
+			"color, size, position, font, padding, visibility or component state. Omit baseline to compare against the " +
+			"checkpoint the user saved for that frame with the plugin window's \"Save checkpoint\" button (only the user " +
+			"moves that one). With baseline, the snapshot is a project file: the first run saves it and reports nothing, " +
+			"later runs compare against it. Use it to see what a design update affects.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args diffDesignArgs) (*mcp.CallToolResult, any, error) {
+		text := func(s string) *mcp.CallToolResult {
+			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: s}}}
+		}
+		checkpoint := args.Baseline == ""
+		var dest string
+		var err error
+		if checkpoint {
+			if args.Update {
+				return nil, nil, fmt.Errorf("update needs a baseline path: the checkpoint is moved only by the user, with Save checkpoint in the plugin window")
+			}
+			file, err := connectedFile(ctx, b, args.File)
+			if err != nil {
+				return nil, nil, err
+			}
+			if dest, err = checkpointPath(file, args.NodeID); err != nil {
+				return nil, nil, err
+			}
+		} else if dest, err = resolveProjectPath(args.Baseline); err != nil {
+			return nil, nil, err
+		}
+		// Depth 100 reaches every layer of any real screen.
+		cur, err := b.Call(ctx, args.File, "get_design_context",
+			map[string]any{"node_id": args.NodeID, "depth": 100}, bridge.DefaultTimeout)
+		if err != nil {
+			return nil, nil, err
+		}
+		old, err := readSnapshot(dest)
+		if os.IsNotExist(err) {
+			if checkpoint {
+				return text(fmt.Sprintf("No checkpoint saved for node %s. The user saves one by selecting the frame "+
+					"and clicking Save checkpoint in the Figma MCP Console window; changes are tracked from then on.", args.NodeID)), nil, nil
+			}
+			if err := writeSnapshot(dest, cur); err != nil {
+				return nil, nil, err
+			}
+			return text(fmt.Sprintf("No snapshot yet: saved the current design of node %s to %s. "+
+				"Run diff_design again after the design changes to see what changed.", args.NodeID, dest)), nil, nil
+		}
+		if err != nil {
+			return nil, nil, fmt.Errorf("read baseline: %w", err)
+		}
+		info, _ := os.Stat(dest)
+		report, err := diffDesign(old, cur)
+		if err != nil {
+			return nil, nil, err
+		}
+		what := dest
+		if checkpoint {
+			what = "the user's checkpoint"
+		}
+		head := fmt.Sprintf("Node %s compared with %s (saved %s).\n", args.NodeID, what, info.ModTime().Format("2006-01-02 15:04"))
+		if args.Update {
+			if err := writeSnapshot(dest, cur); err != nil {
+				return nil, nil, err
+			}
+			report += "\nBaseline replaced with the current design.\n"
+		}
+		return text(head + report), nil, nil
+	})
+	registerBridged[scanArgs](s, b, "get_component_states",
+		"List every component used inside a frame, grouped by component, with all the states (variant values such as "+
+			"State=Default/Error/Disabled) its component set defines and the state each instance is shown in. "+
+			"It also lists instances edited by hand on top of their component (overrides: which layer, which fields, "+
+			"e.g. fills or characters), the usual sign of a state drawn by hand instead of picked from the variants. "+
+			"Use it to find states the design defines but a spec or test plan misses.",
 		bridge.DefaultTimeout)
+	registerBridged[auditArgs](s, b, "audit_design",
+		"Check a frame for defects a screenshot shows but is easy to misread, and return only the findings: layers cut off "+
+			"or hidden by a clipping parent, layers sticking out of their parent, text spilling out of or truncated in a fixed box, "+
+			"text below WCAG AA contrast (4.5:1, 3:1 for large text) and, with min_touch, controls too small to tap. "+
+			"Run it after drawing or changing a screen and fix what it lists before taking a screenshot; an empty list means "+
+			"none of these were found, not that the design is right. Read-only: it never changes the file.",
+		bridge.DefaultTimeout)
+	registerBridged[batchArgs](s, b, "batch",
+		"Run several commands in one call, in order: building a screen is one batch instead of dozens of calls. "+
+			"Each op is another tool's name and arguments, and \"$N\" in an argument stands for the id of the node op N created, "+
+			"so a frame and everything inside it fit in one batch. Each op reports its own result or error; a failed op does not "+
+			"undo or stop the others unless stop_on_error is set. Not for get_screenshot, download_assets, import_image, "+
+			"diff_design or export_tokens, which run only as their own call.",
+		screenshotTimeout)
 	registerBridged[createShapeArgs](s, b, "create_frame",
-		"Create a new frame at the given position and size. Returns the created node's summary including its id.",
+		"Create a new frame at the given position and size. Returns the created node's summary including its id. "+
+			"A top-level frame is filled white and, when x and y are omitted, placed beside the existing frames; "+
+			"a frame nested in another has no fill unless fill_color is given.",
 		bridge.DefaultTimeout)
 	registerBridged[createShapeArgs](s, b, "create_rectangle",
 		"Create a new rectangle at the given position and size. Returns the created node's summary including its id.",
@@ -694,6 +907,43 @@ func Register(s *mcp.Server, b *bridge.Router) {
 			"Returns the page's full list of starting points.",
 		bridge.DefaultTimeout)
 
+	// export_tokens renders (and can save) the variables here; the plugin only
+	// supplies them.
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "export_tokens",
+		Description: "Export the file's variables (design tokens) as CSS custom properties or a W3C design-tokens JSON tree, " +
+			"with aliases kept as references (var(--x) / {x.y}). Use it to bring tokens into a codebase's theme file. " +
+			"Numbers are exported without units, since a Figma number may be a length, a weight or an opacity: add px where it is a length.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args exportTokensArgs) (*mcp.CallToolResult, any, error) {
+		var dest string
+		if args.Out != "" {
+			var err error
+			if dest, err = resolveProjectPath(args.Out); err != nil {
+				return nil, nil, err
+			}
+		}
+		raw, err := b.Call(ctx, args.File, "get_variable_defs", emptyArgs{}, bridge.DefaultTimeout)
+		if err != nil {
+			return nil, nil, err
+		}
+		text, count, err := renderTokens(raw, args.Format, args.Mode)
+		if err != nil {
+			return nil, nil, err
+		}
+		if dest != "" {
+			if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+				return nil, nil, fmt.Errorf("create directory: %w", err)
+			}
+			if err := os.WriteFile(dest, []byte(text), 0o644); err != nil {
+				return nil, nil, fmt.Errorf("write file: %w", err)
+			}
+			text = fmt.Sprintf("Saved %d tokens to %s", count, dest)
+		}
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: text}},
+		}, nil, nil
+	})
+
 	// get_screenshot returns an image, so it can't use registerBridged.
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "get_screenshot",
@@ -808,6 +1058,7 @@ func Register(s *mcp.Server, b *bridge.Router) {
 				"node_id": item.NodeID,
 				"format":  format,
 				"scale":   item.Scale,
+				"exact":   item.ExactBounds,
 			}
 		}
 		raw, err := b.Call(ctx, args.File, "download_assets", map[string]any{"items": pluginItems}, downloadTimeout(len(args.Items)))
@@ -862,8 +1113,14 @@ func Register(s *mcp.Server, b *bridge.Router) {
 			if err := os.WriteFile(dests[i], data, 0o644); err != nil {
 				return nil, nil, fmt.Errorf("write file: %w", err)
 			}
-			lines = append(lines, fmt.Sprintf("Exported %q (%.0fx%.0f px) as %s to %s (%d bytes)",
-				res.Name, res.Width, res.Height, res.Format, dests[i], len(data)))
+			// Report the image's real size: shadows and overflowing children
+			// make it larger than the node, and callers check it against that.
+			size := fmt.Sprintf("node %.0fx%.0f", res.Width, res.Height)
+			if cfg, _, err := image.DecodeConfig(bytes.NewReader(data)); err == nil {
+				size = fmt.Sprintf("image %dx%d px, %s", cfg.Width, cfg.Height, size)
+			}
+			lines = append(lines, fmt.Sprintf("Exported %q (%s) as %s to %s (%d bytes)",
+				res.Name, size, res.Format, dests[i], len(data)))
 		}
 		if failed == len(args.Items) {
 			return nil, nil, fmt.Errorf("all %d exports failed:\n%s", failed, strings.Join(lines, "\n"))
