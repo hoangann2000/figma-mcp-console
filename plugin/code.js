@@ -593,6 +593,18 @@ async function importSvg(params) {
   return summarize(n);
 }
 
+// Figma's own wording for "could not load that data" blames the network,
+// which sends people checking their connection. It shows up when a page that
+// was never opened in this session is loaded, and for some ids that do not exist.
+function explainError(message) {
+  if (/Unable to establish connection to Figma/i.test(message)) {
+    return message + " — Figma could not load the data for this request; the network is usually fine. " +
+      "If it reads another page, open that page once in Figma (or reopen the file) and retry; " +
+      "if it names a node id, check the id with find_nodes.";
+  }
+  return message;
+}
+
 // ---------- command handlers (names match MCP tool names) ----------
 
 const handlers = {
@@ -613,6 +625,36 @@ const handlers = {
         current: p.id === figma.currentPage.id,
       })),
     };
+  },
+
+  async create_page(params) {
+    if (!params.name) throw new Error("name is required");
+    const p = figma.createPage();
+    p.name = params.name;
+    if (params.index !== undefined && params.index !== null) figma.root.insertChild(params.index, p);
+    return { id: p.id, name: p.name, index: figma.root.children.indexOf(p) };
+  },
+
+  async rename_page(params) {
+    if (!params.name) throw new Error("name is required");
+    const p = await resolvePage(params.page);
+    const from = p.name;
+    p.name = params.name;
+    return { id: p.id, from, name: p.name };
+  },
+
+  // Figma cannot remove the open page or the last one: open a neighbour first.
+  async remove_page(params) {
+    const p = await resolvePage(params.page);
+    const pages = figma.root.children;
+    if (pages.length === 1) throw new Error("page " + p.name + " is the file's only page and cannot be removed");
+    if (p.id === figma.currentPage.id) {
+      const i = pages.indexOf(p);
+      await figma.setCurrentPageAsync(pages[i === 0 ? 1 : i - 1]);
+    }
+    const out = { removed: { id: p.id, name: p.name, layers: p.children.length }, currentPage: figma.currentPage.name };
+    p.remove();
+    return out;
   },
 
   async set_current_page(params) {
@@ -1752,7 +1794,7 @@ figma.ui.onmessage = async (msg) => {
     const result = await h(p);
     figma.ui.postMessage({ id: msg.id, result: result === undefined ? null : result });
   } catch (e) {
-    act.error = String((e && e.message) || e);
+    act.error = explainError(String((e && e.message) || e));
     figma.ui.postMessage({ id: msg.id, error: act.error });
   }
   figma.ui.postMessage({ activity: act });

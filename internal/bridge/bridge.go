@@ -80,7 +80,7 @@ type PluginHook func(ctx context.Context, file FileInfo, req json.RawMessage,
 // server is diagnosed up front instead of failing later with a cryptic
 // "unknown command". Bump it on any breaking change to the command set or
 // message shape the plugin must understand.
-const ProtocolVersion = 4
+const ProtocolVersion = 5
 
 // Keepalive tuning for plugin connections. A dead Figma window (asleep,
 // crashed tab, sleeping machine) may never send a TCP FIN, so the owner

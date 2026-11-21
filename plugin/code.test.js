@@ -185,5 +185,103 @@ eval(src + "\nglobalThis.__h = handlers; globalThis.__resolve = resolveRefs; glo
   assert.deepStrictEqual((await __h.remove_variable_collection({ collection_id: "C1" })).removed, { id: "C1", name: "theme", variables: 2 });
   assert.deepStrictEqual(gone, ["V1", "C1"]);
 
+  {
+    // set_prototype_links: items for one node become its single set of reactions
+    const got = {};
+    const btn = { id: "7:1", name: "Btn", type: "INSTANCE", setReactionsAsync: async (r) => (got.r = r) };
+    nodes["7:1"] = btn; nodes["7:2"] = { id: "7:2", name: "Detail", type: "FRAME" };
+    await __h.set_prototype_links({ items: [
+      { node_id: "7:1", destination_id: "7:2", transition: "smart_animate" },
+      { node_id: "7:1", trigger: "ON_HOVER", navigation: "BACK" },
+    ] });
+    assert.strictEqual(got.r.length, 2, "both links on one node land in one call");
+    assert.deepStrictEqual(got.r[0].actions[0].destinationId, "7:2");
+    assert.strictEqual(got.r[0].actions[0].transition.type, "SMART_ANIMATE");
+    assert.ok(!("direction" in got.r[0].actions[0].transition), "smart animate takes no direction");
+    assert.deepStrictEqual(got.r[1], { trigger: { type: "ON_HOVER" }, actions: [{ type: "BACK" }] });
+    await assert.rejects(__h.set_prototype_links({ items: [{ node_id: "7:1" }] }), /destination_id is required for NAVIGATE/);
+    await assert.rejects(__h.set_prototype_links({ items: [{ node_id: "7:1", destination_id: "7:2", trigger: "ON_WINK" }] }), /unsupported trigger/);
+    await assert.rejects(__h.set_prototype_links({ items: [{ node_id: "7:1", destination_id: "7:2", transition: "FLIP" }] }), /unsupported transition/);
+
+    // combine_as_variants: Figma stacks variants; the handler lays them out and sizes the set
+    const v1 = { id: "8:1", type: "COMPONENT", width: 100, height: 40 }, v2 = { id: "8:2", type: "COMPONENT", width: 120, height: 60 };
+    nodes["8:1"] = v1; nodes["8:2"] = v2; nodes["8:3"] = { id: "8:3", type: "FRAME" };
+    let size;
+    figma.combineAsVariants = (list, parent) => ({ id: "8:9", name: "Set", type: "COMPONENT_SET", layoutMode: "NONE", children: list, parent, resize: (w, h) => (size = [w, h]) });
+    v1.parent = { id: "8:0", type: "FRAME" };
+    const set = await __h.combine_as_variants({ node_ids: ["8:1", "8:2"], name: "Button" });
+    assert.deepStrictEqual([v1.y, v2.y, size, set.name], [0, 72, [120, 132], "Button"]);
+    await assert.rejects(__h.combine_as_variants({ node_ids: ["8:1", "8:3"] }), /is FRAME, not a COMPONENT/);
+
+    // set_bound_variable: paints are bound through setBoundVariableForPaint, other fields directly
+    const card2 = { id: "9:5", type: "FRAME", fills: [{ type: "SOLID", color: { r: 1, g: 1, b: 1 } }], setBoundVariable(f, v) { this.bound = [f, v.id]; } };
+    nodes["9:5"] = card2;
+    figma.variables.getVariableByIdAsync = async (id) => (id === "VAR1" ? { id, name: "color/bg" } : null);
+    figma.variables.setBoundVariableForPaint = (paint, field, v) => Object.assign({}, paint, { boundVariables: { [field]: v.id } });
+    await __h.set_bound_variable({ node_id: "9:5", field: "fills", variable_id: "VAR1" });
+    assert.deepStrictEqual(card2.fills[0].boundVariables, { color: "VAR1" });
+    await __h.set_bound_variable({ node_id: "9:5", field: "width", variable_id: "VAR1" });
+    assert.deepStrictEqual(card2.bound, ["width", "VAR1"]);
+    await assert.rejects(__h.set_bound_variable({ node_id: "9:5", field: "fills", variable_id: "NOPE" }), /variable not found/);
+
+    // find_nodes: style filters, chosen fields, named scope
+    const red = [{ type: "SOLID", color: { r: 1, g: 0, b: 0 } }];
+    const pool = [
+      { id: "f1", name: "Title", type: "TEXT", characters: "Hello", fontSize: 14, fontName: { family: "Inter", style: "Bold" }, fills: red },
+      { id: "f2", name: "Box", type: "RECTANGLE", fills: red },
+      { id: "f3", name: "Body", type: "TEXT", characters: "World", fontSize: 16, fontName: { family: "Inter", style: "Regular" }, fills: [] },
+    ];
+    nodes["9:6"] = { id: "9:6", name: "Screen", type: "FRAME", parent: { type: "PAGE", name: "Home" }, findAll: (fn) => pool.filter(fn) };
+    const ids = async (q) => (await __h.find_nodes(Object.assign({ node_id: "9:6" }, q))).nodes.map((n) => n.id);
+    assert.deepStrictEqual(await ids({ fill: "FF0000" }), ["f1", "f2"]);
+    assert.deepStrictEqual(await ids({ fill: "#ff0000", types: ["TEXT"] }), ["f1"]);
+    assert.deepStrictEqual(await ids({ font_size: 16 }), ["f3"]);
+    assert.deepStrictEqual(await ids({ font_style: "bold" }), ["f1"]);
+    assert.deepStrictEqual(await ids({ text: "WOR" }), ["f3"]);
+    const fr = await __h.find_nodes({ node_id: "9:6", name: "title", fields: ["fills", "characters"] });
+    assert.deepStrictEqual([fr.scope, fr.nodes[0].fills, fr.nodes[0].characters], ["Screen (page Home)", ["#ff0000"], "Hello"]);
+
+    // add_component_property: creates the property and binds it to the child layer
+    const lbl = { id: "9:8", componentPropertyReferences: { visible: "Show#1:1" } };
+    const comp = { id: "9:7", type: "COMPONENT", addComponentProperty: (n, t, d) => { comp.added = [n, t, d]; return n + "#9:1"; } };
+    nodes["9:7"] = comp; nodes["9:8"] = lbl;
+    const prop = await __h.add_component_property({ component_id: "9:7", name: "Label", default_value: "OK", bind_node_id: "9:8" });
+    assert.deepStrictEqual([prop.key, lbl.componentPropertyReferences], ["Label#9:1", { visible: "Show#1:1", characters: "Label#9:1" }]);
+    await __h.add_component_property({ component_id: "9:7", name: "Icon", type: "boolean" });
+    assert.deepStrictEqual(comp.added, ["Icon", "BOOLEAN", false], "a missing BOOLEAN default becomes false");
+    await assert.rejects(__h.add_component_property({ component_id: "9:5", name: "X" }), /not a COMPONENT or COMPONENT_SET/);
+
+    // pages: create at an index, rename, remove the open page (its neighbour opens), refuse the last one
+    const mk = (id, name) => ({ id, name, type: "PAGE", children: [], loadAsync: async () => {},
+      remove() { figma.root.children.splice(figma.root.children.indexOf(this), 1); } });
+    const home = mk("0:1", "Home"), draft = mk("0:2", "Draft");
+    figma.root.children = [home, draft];
+    figma.root.insertChild = (i, pg) => { const a = figma.root.children; a.splice(a.indexOf(pg), 1); a.splice(i, 0, pg); };
+    figma.createPage = () => { const pg = mk("0:9", "Page 3"); figma.root.children.push(pg); return pg; };
+    figma.setCurrentPageAsync = async (pg) => { figma.currentPage = pg; };
+    figma.currentPage = draft;
+    assert.deepStrictEqual(await __h.create_page({ name: "MCP Test", index: 0 }), { id: "0:9", name: "MCP Test", index: 0 });
+    assert.deepStrictEqual((await __h.rename_page({ page: "mcp", name: "Scratch" })).from, "MCP Test");
+    const rm = await __h.remove_page({ page: "Draft" });
+    assert.deepStrictEqual([rm.removed.name, rm.currentPage, figma.root.children.map((x) => x.name)], ["Draft", "Home", ["Scratch", "Home"]]);
+    await __h.remove_page({ page: "Scratch" });
+    await assert.rejects(__h.remove_page({ page: "Home" }), /only page/);
+
+    // read-only: the page tools are writes, list_pages stays a read
+    await figma.ui.onmessage({ setReadOnly: true });
+    await figma.ui.onmessage({ id: "p1", command: "create_page", params: { name: "X" } });
+    await figma.ui.onmessage({ id: "p2", command: "list_pages", params: {} });
+    assert.match(posted.find((m) => m.id === "p1").error, /blocked: read-only/);
+    assert.ok(posted.find((m) => m.id === "p2").result);
+
+    // Figma's "Unable to establish connection" gets a hint that is not about the network
+    const keep = figma.getNodeByIdAsync;
+    figma.getNodeByIdAsync = async () => { throw new Error("Unable to establish connection to Figma after 10 seconds. Please check your internet connection."); };
+    await figma.ui.onmessage({ id: "p3", command: "get_design_context", params: { node_id: "1:1" } });
+    figma.getNodeByIdAsync = keep;
+    assert.match(posted.find((m) => m.id === "p3").error, /could not load the data for this request; the network is usually fine/);
+    await figma.ui.onmessage({ setReadOnly: false });
+  }
+
   console.log("ALL OK");
 })().catch((e) => { console.error(e); process.exit(1); });

@@ -6,6 +6,51 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-21
+
+### Upgrading from 0.7.x
+
+Re-import the Figma plugin: protocol 4 → 5, for the page tools.
+`import_image` now fetches only public `https` URLs (see Security).
+
+### Added
+
+- **`create_page`**, **`rename_page`**, **`remove_page`**. Removing the open
+  page opens its neighbour first; the file's only page cannot be removed. All
+  three are writes, so Read-only blocks them; `list_pages` and
+  `set_current_page` still work while it is on.
+- Figma's "Unable to establish connection to Figma … check your internet
+  connection" now comes with what it usually means: data for a page not yet
+  opened in this session, or a node id that does not exist.
+- README: Read-only, the design checks, token sync, icons, updating the
+  plugin, and troubleshooting rows for "blocked: read-only", "Plugin
+  outdated", "Server outdated" and files you cannot edit.
+
+### Changed
+
+- Tool definitions are about 1,250 tokens smaller: the `file` parameter,
+  repeated in 61 tools, has a shorter description.
+- CI and release use `actions/checkout@v7`, `setup-go@v7`, `setup-node@v7`
+  (Node 24); the release job never restores a package cache.
+
+### Security
+
+- **`import_image` fetches only public `https` addresses.** `http://` URLs,
+  this machine, private and link-local networks (including cloud metadata at
+  169.254.169.254) and carrier-grade NAT are refused where the connection is
+  made, so a redirect or a DNS name pointing inward is refused too;
+  redirects are limited to 5 and must stay on https; proxy settings from the
+  environment are ignored. The AI chooses the URL, and text it reads (a spec,
+  a design) could otherwise steer the server at local services.
+
+### Tests
+
+- Plugin tests now cover prototype links, variant layout, variable binding,
+  `find_nodes` filters, component properties, the page tools, Read-only on
+  them, and the new error hint; each was checked to fail when the code it
+  covers is broken.
+- Tool count: 62 → 65.
+
 ## [0.7.0] - 2026-11-21
 
 ### Upgrading from 0.6.x
