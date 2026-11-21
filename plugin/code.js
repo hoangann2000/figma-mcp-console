@@ -887,6 +887,20 @@ const handlers = {
     return out;
   },
 
+  // Sections sit on a page (or in another section) and group screens.
+  async create_section(params) {
+    const parent = await parentOf(params);
+    if (parent.type !== "PAGE" && parent.type !== "SECTION") throw new Error("a section goes on a page or inside another section, not in " + parent.type);
+    const s = figma.createSection();
+    if (params.name) s.name = params.name;
+    parent.appendChild(s);
+    s.x = params.x || 0;
+    s.y = params.y || 0;
+    if (params.width > 0 && params.height > 0) s.resizeWithoutConstraints(params.width, params.height);
+    if (parent.type === "PAGE" && params.x == null && params.y == null) placeInFreeSpace(s, parent);
+    return summarize(s);
+  },
+
   async create_rectangle(params) {
     const r = figma.createRectangle();
     applyShapeParams(r, params);
@@ -1095,10 +1109,14 @@ const handlers = {
   async set_node_properties(params) {
     const nodes = await targets(params);
     const given = (k) => params[k] !== undefined && params[k] !== null;
-    if (!["visible", "opacity", "rotation", "locked", "clips_content"].some(given)) {
-      throw new Error("pass at least one of visible, opacity, rotation, locked, clips_content");
+    if (!["visible", "opacity", "rotation", "locked", "clips_content", "description"].some(given)) {
+      throw new Error("pass at least one of visible, opacity, rotation, locked, clips_content, description");
     }
     for (const n of nodes) {
+      if (given("description")) {
+        if (n.type !== "COMPONENT" && n.type !== "COMPONENT_SET") throw new Error("node " + n.id + " is " + n.type + "; only components and component sets carry a description");
+        n.description = params.description;
+      }
       if (given("visible")) n.visible = params.visible;
       if (given("locked")) n.locked = params.locked;
       if (given("opacity")) {
@@ -1203,6 +1221,8 @@ const handlers = {
         n.letterSpacing = { value: params.letter_spacing, unit: "PIXELS" };
       }
       if (params.text_align) n.textAlignHorizontal = params.text_align;
+      if (params.text_decoration) n.textDecoration = params.text_decoration;
+      if (params.text_case) n.textCase = params.text_case;
       if (params.fill_color) n.fills = [{ type: "SOLID", color: hexToRGB(params.fill_color) }];
     }
     return done(params, nodes);
@@ -1525,6 +1545,54 @@ const handlers = {
     s.name = params.name;
     s.effects = buildEffects(params.effects);
     return { id: s.id, name: s.name };
+  },
+
+  // Edits a style in place: every layer using it follows.
+  async update_style(params) {
+    const s = await figma.getStyleByIdAsync(params.style_id);
+    if (!s) throw new Error("style not found: " + params.style_id + " (see get_local_styles)");
+    const given = (k) => params[k] !== undefined && params[k] !== null && params[k] !== "";
+    const wrong = (keys, kind) => {
+      const k = keys.find(given);
+      if (k) throw new Error(k + " applies to " + kind + " styles; " + s.name + " is a " + s.type + " style");
+    };
+    if (s.type !== "PAINT") wrong(["color", "opacity"], "PAINT");
+    if (s.type !== "TEXT") wrong(["font_family", "font_style", "font_size"], "TEXT");
+    if (s.type !== "EFFECT") wrong(["effects"], "EFFECT");
+    if (given("name")) s.name = params.name;
+    if (params.description !== undefined && params.description !== null) s.description = params.description;
+    if (s.type === "PAINT" && (given("color") || given("opacity"))) {
+      const cur = s.paints[0] && s.paints[0].type === "SOLID" ? s.paints[0] : { type: "SOLID", color: { r: 0, g: 0, b: 0 } };
+      const paint = { type: "SOLID", color: given("color") ? hexToRGB(params.color) : cur.color };
+      const op = given("opacity") ? params.opacity : cur.opacity;
+      if (op !== undefined) paint.opacity = op;
+      s.paints = [paint];
+    }
+    if (s.type === "TEXT") {
+      if (given("font_family") || given("font_style")) {
+        const font = { family: params.font_family || s.fontName.family, style: params.font_style || s.fontName.style };
+        await figma.loadFontAsync(font);
+        s.fontName = font;
+      } else if (given("font_size")) {
+        await figma.loadFontAsync(s.fontName);
+      }
+      if (given("font_size")) s.fontSize = params.font_size;
+    }
+    if (s.type === "EFFECT" && params.effects) s.effects = buildEffects(params.effects);
+    return { id: s.id, name: s.name, type: s.type };
+  },
+
+  // Layers using a removed style keep the look it gave them.
+  async remove_styles(params) {
+    const removed = [];
+    for (const id of params.style_ids || []) {
+      const s = await figma.getStyleByIdAsync(id);
+      if (!s) throw new Error("style not found: " + id + " (see get_local_styles)");
+      removed.push({ id: s.id, name: s.name, type: s.type });
+      s.remove();
+    }
+    if (!removed.length) throw new Error("style_ids is required");
+    return { removed };
   },
 
   async apply_style(params) {

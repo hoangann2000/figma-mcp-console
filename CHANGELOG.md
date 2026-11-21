@@ -20,7 +20,13 @@ Re-import the Figma plugin: protocol 5 → 6.
 - **`set_node_properties`** — visibility, opacity, rotation, lock, and a
   frame's clipping.
 - `set_auto_layout`: `layout_wrap` and `counter_axis_spacing` for rows that wrap.
-- Tool count: 65 → 67.
+- **`create_section`**, placed in free space when no position is given.
+- **`update_style`** and **`remove_styles`**: edit a style's name,
+  description, color, font or effects in place, or delete it.
+- `set_text_properties`: `text_decoration` (underline, strikethrough) and
+  `text_case`.
+- `set_node_properties`: `description` for components and component sets.
+- Tool count: 65 → 70.
 
 ## [0.8.1] - 2026-11-21
 

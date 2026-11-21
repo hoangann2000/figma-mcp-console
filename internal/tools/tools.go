@@ -216,7 +216,37 @@ type textPropertiesArgs struct {
 	LineHeight    *float64 `json:"line_height,omitempty" jsonschema:"line height in pixels"`
 	LetterSpacing *float64 `json:"letter_spacing,omitempty" jsonschema:"letter spacing in pixels (may be negative)"`
 	TextAlign     string   `json:"text_align,omitempty" jsonschema:"LEFT, CENTER, RIGHT, or JUSTIFIED"`
+	TextDecor     string   `json:"text_decoration,omitempty" jsonschema:"NONE, UNDERLINE or STRIKETHROUGH"`
+	TextCase      string   `json:"text_case,omitempty" jsonschema:"ORIGINAL, UPPER, LOWER or TITLE"`
 	FillColor     string   `json:"fill_color,omitempty" jsonschema:"text color as hex, e.g. #111111"`
+}
+
+type sectionArgs struct {
+	fileArg
+	Name     string   `json:"name,omitempty" jsonschema:"section name"`
+	X        *float64 `json:"x,omitempty" jsonschema:"x position; omit x and y to place it in free space beside the page's content"`
+	Y        *float64 `json:"y,omitempty" jsonschema:"y position"`
+	Width    float64  `json:"width,omitempty" jsonschema:"width in pixels"`
+	Height   float64  `json:"height,omitempty" jsonschema:"height in pixels"`
+	ParentID string   `json:"parent_id,omitempty" jsonschema:"page or section to put it in (default: current page)"`
+}
+
+type updateStyleArgs struct {
+	fileArg
+	StyleID     string       `json:"style_id" jsonschema:"style to edit, id from get_local_styles"`
+	Name        string       `json:"name,omitempty" jsonschema:"new style name"`
+	Description *string      `json:"description,omitempty" jsonschema:"style description"`
+	Color       string       `json:"color,omitempty" jsonschema:"PAINT styles: new solid color as hex"`
+	Opacity     *float64     `json:"opacity,omitempty" jsonschema:"PAINT styles: paint opacity 0..1"`
+	FontFamily  string       `json:"font_family,omitempty" jsonschema:"TEXT styles: font family"`
+	FontStyle   string       `json:"font_style,omitempty" jsonschema:"TEXT styles: font style, e.g. Bold"`
+	FontSize    float64      `json:"font_size,omitempty" jsonschema:"TEXT styles: font size in pixels"`
+	Effects     []effectSpec `json:"effects,omitempty" jsonschema:"EFFECT styles: effects replacing the current ones"`
+}
+
+type removeStylesArgs struct {
+	fileArg
+	StyleIDs []string `json:"style_ids" jsonschema:"styles to delete, ids from get_local_styles"`
 }
 
 type combineVariantsArgs struct {
@@ -417,6 +447,7 @@ type nodePropertiesArgs struct {
 	Rotation     *float64 `json:"rotation,omitempty" jsonschema:"rotation in degrees, counter-clockwise"`
 	Locked       *bool    `json:"locked,omitempty" jsonschema:"lock or unlock the layer against edits on the canvas"`
 	ClipsContent *bool    `json:"clips_content,omitempty" jsonschema:"frames only: cut off children outside the frame's bounds, or let them show"`
+	Description  *string  `json:"description,omitempty" jsonschema:"components and component sets only: the description shown in the assets panel and to developers"`
 }
 
 type cornerRadiusArgs struct {
@@ -832,6 +863,9 @@ func Register(s *mcp.Server, b *bridge.Router) {
 			"A top-level frame is filled white and, when x and y are omitted, placed beside the existing frames; "+
 			"a frame nested in another has no fill unless fill_color is given.",
 		bridge.DefaultTimeout)
+	registerBridged[sectionArgs](s, b, "create_section",
+		"Create a section on a page, the labelled area files use to group related screens. Move frames into it with append_children.",
+		bridge.DefaultTimeout)
 	registerBridged[createShapeArgs](s, b, "create_rectangle",
 		"Create a new rectangle at the given position and size. Returns the created node's summary including its id.",
 		bridge.DefaultTimeout)
@@ -916,6 +950,12 @@ func Register(s *mcp.Server, b *bridge.Router) {
 	registerBridged[effectStyleArgs](s, b, "create_effect_style",
 		"Create a named effect style (shadows and blurs).",
 		bridge.DefaultTimeout)
+	registerBridged[updateStyleArgs](s, b, "update_style",
+		"Edit a local style in place (name, description, and its color, font or effects by style type); every layer using it follows.",
+		bridge.DefaultTimeout)
+	registerBridged[removeStylesArgs](s, b, "remove_styles",
+		"Delete local styles. Layers that used one keep the look it gave them.",
+		bridge.DefaultTimeout)
 	registerBridged[applyStyleArgs](s, b, "apply_style",
 		"Apply a local style to a node; PAINT styles go to the fill by default or the stroke via target.",
 		bridge.DefaultTimeout)
@@ -969,7 +1009,7 @@ func Register(s *mcp.Server, b *bridge.Router) {
 			"grow sizing_horizontal FILL instead of a fixed width.",
 		bridge.DefaultTimeout)
 	registerBridged[nodePropertiesArgs](s, b, "set_node_properties",
-		"Show or hide layers, set their opacity or rotation, lock them, or turn a frame's clipping on or off.",
+		"Show or hide layers, set their opacity or rotation, lock them, turn a frame's clipping on or off, or set a component's description.",
 		bridge.DefaultTimeout)
 	registerBridged[cornerRadiusArgs](s, b, "set_corner_radius",
 		"Set corner radius on a node, either uniform or per-corner.",

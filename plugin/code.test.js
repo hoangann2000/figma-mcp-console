@@ -317,5 +317,43 @@ eval(src + "\nglobalThis.__h = handlers; globalThis.__resolve = resolveRefs; glo
     await assert.rejects(__h.set_auto_layout({ node_id: "L:5", layout_mode: "VERTICAL", layout_wrap: "WRAP" }), /needs layout_mode HORIZONTAL/);
   }
 
+  {
+    // update_style: only the fields of the style's own type; remove_styles
+    const styles = {
+      P: { id: "P", name: "color/primary", type: "PAINT", paints: [{ type: "SOLID", color: { r: 0, g: 0, b: 0 }, opacity: 0.5 }], remove() { this.gone = true; } },
+      T: { id: "T", name: "text/body", type: "TEXT", fontName: { family: "Inter", style: "Regular" }, fontSize: 14 },
+    };
+    figma.getStyleByIdAsync = async (id) => styles[id] || null;
+    const loaded = [];
+    figma.loadFontAsync = async (f) => { loaded.push(f.family + " " + f.style); };
+    await __h.update_style({ style_id: "P", color: "#ff0000", name: "color/brand", description: "" });
+    assert.deepStrictEqual([styles.P.name, styles.P.paints[0].color.r, styles.P.paints[0].opacity, styles.P.description], ["color/brand", 1, 0.5, ""]);
+    await __h.update_style({ style_id: "T", font_style: "Bold", font_size: 16 });
+    assert.deepStrictEqual([styles.T.fontName, styles.T.fontSize, loaded], [{ family: "Inter", style: "Bold" }, 16, ["Inter Bold"]]);
+    await assert.rejects(__h.update_style({ style_id: "T", color: "#fff" }), /color applies to PAINT styles; text\/body is a TEXT style/);
+    assert.deepStrictEqual((await __h.remove_styles({ style_ids: ["P"] })).removed[0].name, "color/brand");
+    assert.ok(styles.P.gone);
+    await assert.rejects(__h.remove_styles({ style_ids: ["Z"] }), /style not found: Z/);
+
+    // create_section: only on a page or section; free space when no position is given
+    const pg = { id: "0:5", type: "PAGE", name: "P", selection: [], children: [{ x: 0, y: 20, width: 500, height: 100 }], appendChild(n) { n.parent = this; this.children.push(n); } };
+    figma.currentPage = pg;
+    figma.createSection = () => ({ id: "SEC", type: "SECTION", name: "Section", width: 100, height: 100, resizeWithoutConstraints(w, h) { this.width = w; this.height = h; } });
+    const sec = await __h.create_section({ name: "Login", width: 2000, height: 1200 });
+    assert.deepStrictEqual([sec.name, sec.x, sec.y, sec.width], ["Login", 600, 20, 2000]);
+    nodes["L:0x"] = { id: "L:0x", type: "FRAME", appendChild() {} };
+    await assert.rejects(__h.create_section({ parent_id: "L:0x" }), /goes on a page or inside another section/);
+
+    // text decoration and case; component description
+    const tx = { id: "TX", type: "TEXT", characters: "", fontName: { family: "Inter", style: "Regular" } };
+    nodes.TX = tx;
+    await __h.set_text_properties({ node_id: "TX", text_decoration: "UNDERLINE", text_case: "UPPER" });
+    assert.deepStrictEqual([tx.textDecoration, tx.textCase], ["UNDERLINE", "UPPER"]);
+    nodes.CMP = { id: "CMP", type: "COMPONENT" };
+    await __h.set_node_properties({ node_id: "CMP", description: "Primary action" });
+    assert.strictEqual(nodes.CMP.description, "Primary action");
+    await assert.rejects(__h.set_node_properties({ node_id: "TX", description: "x" }), /only components and component sets/);
+  }
+
   console.log("ALL OK");
 })().catch((e) => { console.error(e); process.exit(1); });
