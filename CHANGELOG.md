@@ -4,7 +4,7 @@ All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 `npm/package.json`.
 
-## [Unreleased]
+## [0.10.0] - 2026-11-22
 
 No plugin protocol change, but the plugin code changed: re-import it to get
 these.
@@ -21,7 +21,8 @@ these.
     the latest plugin;
   - selected layers and the activity log are lists of rows, the log in plain
     words with the layer's name, 20 entries deep;
-  - it follows Figma's light or dark theme.
+  - it follows Figma's light or dark theme, and a button in the footer
+    switches it by hand; the choice is kept.
 - `set_auto_layout` takes `node_ids` like the other `set_*` tools, so a list
   of frames gets the same layout in one call. `node_id` works as before.
 - **`audit_design` touch targets** (`min_touch`): the outermost control is the
