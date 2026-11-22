@@ -11,6 +11,17 @@ these.
 
 ### Changed
 
+- **New plugin window.** 320 px wide, larger type, one heading per block:
+  - the header shows the file, the open page and the state in one word
+    (Connected, Editing while a write runs, Searching, Outdated), with a
+    button to collapse the window to that header;
+  - Read-only is a switch with a line saying what it means;
+  - when Read-only blocks the AI, the window says which command and offers
+    "Allow edits"; a version mismatch names the side to update and links to
+    the latest plugin;
+  - selected layers and the activity log are lists of rows, the log in plain
+    words with the layer's name, 20 entries deep;
+  - it follows Figma's light or dark theme.
 - `set_auto_layout` takes `node_ids` like the other `set_*` tools, so a list
   of frames gets the same layout in one call. `node_id` works as before.
 - **`audit_design` touch targets** (`min_touch`): the outermost control is the

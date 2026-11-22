@@ -1,281 +1,120 @@
 <style>
-  * {
-    box-sizing: border-box;
+  * { box-sizing: border-box; }
+  :root {
+    --bg: #ffffff; --fg: #141414; --muted: #737373; --line: #ededed; --soft: #f5f5f5; --card: #ffffff;
+    --ok: #1f9d57; --wait: #d98a00; --bad: #d93838; --bad-bg: #fdecec; --accent: #d9480f; --accent-bg: #fff1e7;
+    --track: #cfcfcf; --on: #141414; --on-fg: #ffffff;
   }
+  /* Figma adds figma-dark to <html> (showUI themeColors) when its theme is dark. */
+  .figma-dark {
+    --bg: #2c2c2c; --fg: #f4f4f4; --muted: #9c9c9c; --line: #3d3d3d; --soft: #383838; --card: #303030;
+    --ok: #4ccf85; --wait: #f0b840; --bad: #ff7070; --bad-bg: #402626; --accent: #ff9458; --accent-bg: #3d2a1e;
+    --track: #5c5c5c; --on: #f4f4f4; --on-fg: #141414;
+  }
+  html, body { margin: 0; }
+  body { font: 13px/1.4 Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--fg); background: var(--bg); }
+  [hidden] { display: none !important; }
 
-  html,
-  body {
-    height: 100%;
-  }
+  .sec { padding: 14px 16px; }
+  .sec + .sec { border-top: 1px solid var(--line); }
+  .hd, .row { display: flex; align-items: center; gap: 12px; }
+  .logo { width: 36px; height: 36px; border-radius: 10px; background: #141414; display: grid; place-items: center; flex: none; }
+  .logo svg { width: 20px; height: 20px; }
+  .ttl, .t { flex: 1; min-width: 0; }
+  .ttl b { display: block; font-size: 15px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ttl span, .t span { display: block; color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .t b { display: block; font-weight: 600; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .t span.warn { color: var(--accent); }
+  .st { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); white-space: nowrap; flex: none; }
+  #dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bad); flex: none; }
+  #dot.ok { background: var(--ok); }
+  #dot.wait { background: var(--wait); animation: pulse 1.3s ease-in-out infinite; }
+  #dot.busy { background: var(--accent); animation: pulse 0.7s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: 0.3; } }
+  @media (prefers-reduced-motion: reduce) { #dot { animation: none !important; } }
 
-  body {
-    font:
-      12px/1.5 -apple-system,
-      BlinkMacSystemFont,
-      "Segoe UI",
-      sans-serif;
-    margin: 0;
-    padding: 10px;
-    color: #2c2c34;
-    background: linear-gradient(160deg, #f6f7fb 0%, #eef0f7 100%);
-    display: flex;
-    flex-direction: column;
-  }
+  .ib { width: 28px; height: 28px; border: 0; background: none; color: var(--muted); border-radius: 7px; display: grid; place-items: center; cursor: pointer; padding: 0; flex: none; margin-right: -6px; }
+  .ib:hover { background: var(--soft); color: var(--fg); }
+  .ib svg { width: 16px; height: 16px; }
+  button:focus-visible, a:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
 
-  .card {
-    background: #fff;
-    border: 1px solid #e6e8f0;
-    border-radius: 9px;
-    padding: 7px 9px;
-    box-shadow: 0 1px 2px rgba(30, 34, 60, 0.04);
-  }
+  .sw { width: 38px; height: 22px; border-radius: 99px; border: 0; background: var(--track); position: relative; cursor: pointer; padding: 0; flex: none; transition: background 0.15s; }
+  .sw::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform 0.15s; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); }
+  .sw[aria-checked="true"] { background: var(--ok); }
+  .sw[aria-checked="true"]::after { transform: translateX(16px); }
 
-  #status-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    cursor: pointer;
-    font-weight: 600;
-    font-size: 13px;
-    color: #1f2330;
-  }
-
-  #dot {
-    flex: none;
-    width: 9px;
-    height: 9px;
-    border-radius: 50%;
-    background: #e0555b;
-    box-shadow: 0 0 0 3px rgba(224, 85, 91, 0.15);
-    transition:
-      background 0.2s,
-      box-shadow 0.2s;
-  }
-
-  #dot.on {
-    background: #22a06b;
-    box-shadow: 0 0 0 3px rgba(34, 160, 107, 0.15);
-  }
-
-  #result {
-    display: none;
-    margin-top: 10px;
-    border-top: 1px solid #eceef5;
-    padding-top: 9px;
-  }
-
-  #result.show {
-    display: block;
-  }
-
-  .res-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 6px;
-  }
-
-  .res-title {
-    font-weight: 600;
-    font-size: 10px;
-    color: #8288a0;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-
-  .res-list {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    max-height: 190px;
-    overflow: auto;
-  }
-
-  .res-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 5px 7px;
-    border: 1px solid #e6e8f0;
-    border-radius: 7px;
-    background: #fbfcfe;
-  }
-
-  .res-name {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: 11px;
-    color: #2c2c34;
-  }
-
-  .res-type {
-    flex: none;
-    font-size: 9px;
-    color: #a0a4b0;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-  }
-
-  .copy-btn {
-    flex: none;
-    border: 1px solid #d6d9e6;
-    background: #fff;
-    color: #4b5168;
-    border-radius: 6px;
-    padding: 2px 8px;
-    font-size: 10px;
-    cursor: pointer;
-  }
-
-  /* ---- checkpoint: what changed in the selected frame since the user saved it ---- */
-  #cp:empty {
-    display: none;
-  }
-  #cp {
-    margin-top: 10px;
-    font-size: 11px;
-  }
-  #cp .res-head {
-    margin-bottom: 4px;
-    font-size: 10px;
-  }
-  .cp-bar {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-  }
-  .cp-list {
-    max-height: 220px;
-    overflow: auto;
-    margin-top: 5px;
-  }
-  .cp-row {
-    padding: 3px 5px;
-    border-radius: 5px;
-    cursor: pointer;
-    overflow-wrap: anywhere;
-  }
-  .cp-row:hover {
-    background: #f0f2f8;
-  }
-
-  .copy-btn:hover {
-    background: #f0f2f8;
-  }
-
-  .copy-btn.done {
-    color: #22a06b;
-    border-color: #bfe6d3;
-    background: #f0faf5;
-  }
-
-  .copy-all {
-    padding: 1px 6px;
-    font-size: 10px;
-  }
-
-  .out-close {
-    border: none;
-    background: none;
-    color: #8288a0;
-    cursor: pointer;
-    font-size: 13px;
-    padding: 0 2px;
-  }
-
-  .muted {
-    color: #8288a0;
-  }
-
-  .k-del {
-    color: #d1434b;
-    font-weight: 600;
-  }
-
-  .k-chg {
-    color: #b7791f;
-    font-weight: 600;
-  }
-
-  .used {
-    color: #22a06b;
-    font-weight: 600;
-  }
-
-  #credit {
-    margin-top: auto;
-    padding-top: 7px;
-    text-align: center;
-    color: #a0a4b0;
-    font-size: 10px;
-  }
-
-  #version {
-    color: #8288a0;
-  }
-
-  /* ---- read-only switch and activity log ---- */
-  #act-head {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-top: 10px;
-    border-top: 1px solid #eceef5;
-    padding-top: 8px;
-    font-size: 10.5px;
-  }
-  #act-head label {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    cursor: pointer;
-  }
-  #act-counts {
-    flex: 1;
-    text-align: right;
-    cursor: pointer;
-    white-space: nowrap;
-  }
-  #activity {
-    margin-top: 4px;
-    font-size: 10.5px;
-  }
-  #activity:not(.open) {
-    display: none;
-  }
-  .act-row {
-    padding: 2px 4px;
-    border-radius: 4px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .act-row[data-id] {
-    cursor: pointer;
-  }
-  .act-row[data-id]:hover {
-    background: #f0f2f8;
-  }
+  .h { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
+  .h b { font-size: 13.5px; font-weight: 650; }
+  .h i { font-style: normal; color: var(--muted); }
+  .h .r { margin-left: auto; color: var(--muted); font-size: 12.5px; border: 0; background: none; font-family: inherit; cursor: pointer; padding: 0; }
+  .h .r:hover { color: var(--fg); }
+  .h.flat { margin-bottom: 0; }
+  .card { border: 1px solid var(--line); border-radius: 12px; background: var(--card); overflow: auto; max-height: 232px; }
+  .li { display: flex; align-items: center; gap: 10px; padding: 10px 12px; }
+  .li + .li { border-top: 1px solid var(--line); }
+  .li[data-id] { cursor: pointer; }
+  .li[data-id]:hover { background: var(--soft); }
+  .li.err .t span, .bad-text { color: var(--bad); }
+  .chip { height: 26px; padding: 0 10px; border-radius: 8px; border: 0; font: inherit; font-size: 12.5px; font-weight: 600; background: var(--soft); color: var(--fg); cursor: pointer; white-space: nowrap; flex: none; }
+  .chip:hover { filter: brightness(0.96); }
+  .chip.done { color: var(--ok); }
+  .tag { height: 24px; padding: 0 9px; border-radius: 7px; font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; flex: none; background: var(--accent-bg); color: var(--accent); }
+  .tag.add { background: none; color: var(--ok); padding: 0; }
+  .tag.del { background: none; color: var(--bad); padding: 0; }
+  .tag.chg { background: none; color: var(--accent); padding: 0; }
+  .tm { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; flex: none; }
+  .more { margin-top: 10px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--muted); font-size: 12.5px; }
+  .b { height: 32px; padding: 0 14px; border-radius: 9px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; border: 1px solid var(--line); background: var(--bg); color: var(--fg); text-decoration: none; display: inline-flex; align-items: center; }
+  .b:hover { background: var(--soft); }
+  .b:disabled { opacity: 0.55; cursor: default; }
+  .b.pri { background: var(--on); border-color: var(--on); color: var(--on-fg); }
+  .b.pri:hover { filter: brightness(1.15); background: var(--on); }
+  .b.txt { border-color: transparent; background: none; color: var(--muted); font-weight: 500; padding: 0 8px; }
+  .b.wide { width: 100%; justify-content: center; }
+  .msg { border-radius: 12px; padding: 12px; background: var(--accent-bg); }
+  .msg.bad { background: var(--bad-bg); }
+  .msg b { display: block; font-size: 13.5px; margin-bottom: 2px; }
+  .msg p { margin: 0 0 10px; font-size: 12.5px; opacity: 0.85; overflow-wrap: anywhere; }
+  .msg .a { display: flex; gap: 6px; }
+  .msg code { font: 12px ui-monospace, Menlo, monospace; }
+  .cp-list { margin-top: 10px; }
+  .foot { display: flex; padding: 10px 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+  .foot a { margin-left: auto; color: var(--muted); text-decoration: none; }
+  .foot a:hover { color: var(--fg); }
 </style>
 
-<div class="card">
-  <div id="status-row" title="Keep open while AI works · run it in every file">
-    <span id="dot"></span><span id="status">Connecting…</span>
+<div id="app">
+  <div class="sec">
+    <div class="hd">
+      <span class="logo"><svg viewBox="0 0 20 20" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="14" height="14" rx="3"/><path d="M7.5 8l2.5 2-2.5 2M11.5 12.5h2"/></svg></span>
+      <div class="ttl"><b id="file">Figma file</b><span id="page"></span></div>
+      <span class="st"><span id="dot" class="wait"></span><span id="status">Searching</span></span>
+      <button class="ib" id="min" aria-label="Minimize" title="Minimize"></button>
+    </div>
   </div>
-  <div id="result"></div>
-  <div id="cp"></div>
-  <div id="act-head">
-    <label title="Refuse every AI command that would change this file"><input type="checkbox" id="readonly" checked> Read-only</label>
-    <span id="act-counts" class="muted" title="Show or hide what the AI did in this file"></span>
-    <button id="act-clear" class="out-close" title="Clear the log">×</button>
+  <div id="body">
+    <div class="sec" id="notice" hidden></div>
+    <div class="sec">
+      <div class="row">
+        <div class="t"><b>Read-only</b><span id="ro-note">AI can read this file, not change it</span></div>
+        <button class="sw" id="readonly" role="switch" aria-checked="true" aria-label="Read-only" title="Refuse every AI command that would change this file"></button>
+      </div>
+    </div>
+    <div class="sec" id="retry-sec" hidden><button class="b wide" id="retry">Retry now</button></div>
+    <div class="sec" id="sel-sec" hidden>
+      <div class="h"><b>Selection</b><i id="sel-count"></i><button class="r" id="copy-all" hidden>Copy all</button></div>
+      <div class="card" id="result"></div>
+      <div id="cp"></div>
+    </div>
+    <div class="sec">
+      <div class="h flat" id="act-h"><b>AI activity</b><i id="act-n"></i><button class="r" id="act-counts" title="Show or hide what the AI did in this file"></button></div>
+      <div id="act-box" hidden>
+        <div class="card" id="activity"></div>
+        <div class="more"><button class="b txt" id="act-clear" style="padding:0">Clear log</button></div>
+      </div>
+    </div>
+    <div class="foot"><span id="version"></span><a href="https://github.com/hoangann2000/figma-mcp-console#readme" target="_blank">Help</a></div>
   </div>
-  <div id="activity"></div>
-</div>
-<div id="credit">
-  <span id="version"></span>
 </div>
 
 <script>
@@ -285,24 +124,77 @@
   // One bridge serves every plugin window and every MCP session, so there is
   // a single well-known port (also the only one the manifest's
   // devAllowedDomains permits). While disconnected we retry on a short loop;
-  // background tabs throttle timers, so a visibility change and a click on
-  // the status line also trigger an immediate attempt.
+  // background tabs throttle timers, so a visibility change and the Retry
+  // button also trigger an immediate attempt.
   const PORT = 2000,
     RETRY = 1000,
     PROTOCOL = 6; // must match bridge.ProtocolVersion in the Go server
+  const RELEASES = "https://github.com/hoangann2000/figma-mcp-console/releases/latest";
+  const $ = (id) => document.getElementById(id);
   let ws = null; // open connection, null while disconnected
   let attempt = null; // socket currently trying to connect
-  let reg = null; // {key, name} of this file, sent by the main thread
-  let protoWarning = null; // set when the server reports a newer protocol
+  let reg = null; // {key, name, read_only} of this file, sent by the main thread
+  let page = ""; // name of the page open in Figma
+  let behind = null; // "plugin" or "server": the side with the older protocol
+  let serverVersion = "";
+  let working = null; // write command running right now
+  let blocked = null; // last command refused by Read-only, until dismissed
+  let minimized = false;
 
-  function setStatus(connected, text) {
-    document.getElementById("dot").className = connected ? "on" : "";
-    document.getElementById("status").textContent = text;
+  function esc(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
   }
 
-  function label() {
-    if (protoWarning) return protoWarning;
-    return reg ? "Connected · " + reg.name : "Connected (port " + PORT + ")";
+  // "create_frame" -> "Create frame": the log is read by people.
+  function human(command) {
+    const s = String(command).replace(/_/g, " ");
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  }
+
+  const ICON_UP = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10l4-4 4 4"/></svg>';
+  const ICON_DOWN = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4"/></svg>';
+
+  // Header, notice and visibility all follow from the state above.
+  function paint() {
+    const connected = !!ws;
+    $("file").textContent = reg ? reg.name : "Figma file";
+    $("page").textContent = !connected ? "Waiting for your AI client" : page ? "Page: " + page : "";
+    let dot = "ok", word = "Connected";
+    if (!connected) { dot = "wait"; word = "Searching"; }
+    else if (behind) { dot = ""; word = "Outdated"; }
+    else if (working) { dot = "busy"; word = "Editing"; }
+    $("dot").className = dot;
+    $("status").textContent = word;
+    $("version").textContent = serverVersion ? "v" + serverVersion : "";
+    $("retry-sec").hidden = connected;
+
+    // One notice at a time; a version mismatch outranks a blocked edit.
+    const n = $("notice");
+    let html = "";
+    if (connected && behind === "plugin") {
+      html = '<div class="msg bad"><b>Update the plugin</b><p>The server' + (serverVersion ? " (v" + esc(serverVersion) + ")" : "") +
+        " is newer than this plugin. Tools added since will fail until you update.</p>" +
+        '<div class="a"><a class="b pri" href="' + RELEASES + '" target="_blank">Get the new plugin</a></div></div>';
+    } else if (connected && behind === "server") {
+      html = '<div class="msg bad"><b>Restart your AI client</b><p>This plugin is newer than the server it reached' +
+        (serverVersion ? " (v" + esc(serverVersion) + ")" : "") + ". Restarting the client starts the current server.</p></div>";
+    } else if (blocked) {
+      html = '<div class="msg"><b>AI tried to edit this file</b><p>Blocked: <code>' + esc(blocked) +
+        "</code>. Turn off Read-only if the edit is intended, then ask the AI again.</p>" +
+        '<div class="a"><button class="b pri" data-act="allow">Allow edits</button><button class="b txt" data-act="dismiss">Dismiss</button></div></div>';
+    }
+    n.innerHTML = html;
+    n.hidden = !html;
+
+    $("body").hidden = minimized;
+    $("min").innerHTML = minimized ? ICON_DOWN : ICON_UP;
+    $("min").title = minimized ? "Expand" : "Minimize";
+    $("min").setAttribute("aria-label", $("min").title);
+    fit();
   }
 
   function sendRegister() {
@@ -327,7 +219,7 @@
       attempt = null;
       ws = sock;
       sendRegister();
-      setStatus(true, label());
+      paint();
       cp = { id: null };
       syncCheckpoint();
     };
@@ -336,20 +228,14 @@
       if (msg.hello) {
         // Name the side that is behind: a stale server is just as common as
         // a stale plugin, and blaming the plugin sends people re-importing
-        // a plugin that was already up to date.
-        // Show which server build we are talking to; "dev" means a local
-        // go build rather than a release.
-        if (msg.hello.version) {
-          document.getElementById("version").textContent = "v" + msg.hello.version;
-        }
-        protoWarning = null;
+        // a plugin that was already up to date. "dev" as the version means a
+        // local go build rather than a release.
+        serverVersion = msg.hello.version || "";
+        behind = null;
         if (msg.hello.protocol && msg.hello.protocol !== PROTOCOL) {
-          protoWarning =
-            msg.hello.protocol < PROTOCOL
-              ? "⚠ Server outdated — restart your AI client"
-              : "⚠ Plugin outdated — re-import from the latest release";
+          behind = msg.hello.protocol < PROTOCOL ? "server" : "plugin";
         }
-        setStatus(true, label());
+        paint();
         return;
       }
       if (msg.checkpointResult) return onCheckpointResult(msg.checkpointResult);
@@ -363,8 +249,10 @@
       if (attempt === sock) attempt = null;
       if (ws === sock) ws = null;
       if (!ws) {
+        working = null;
+        behind = null;
         drawCheckpoint();
-        setStatus(false, "Searching for MCP server…");
+        paint();
         schedule();
       }
     };
@@ -387,17 +275,9 @@
   // ---- live selection list (name + copyable link) ----
   let selItems = []; // everything currently selected in Figma
 
-  function esc(s) {
-    return String(s)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
-  }
-
   // Frames copy as a link block; every other element copies its exported SVG.
   function copyLabelFor(it) {
-    return it.type === "FRAME" ? "Copy" : "Copy SVG";
+    return it.type === "FRAME" ? "Copy link" : "Copy SVG";
   }
 
   // Copyable text for one item. Frames use the requested link format:
@@ -408,6 +288,12 @@
   function copyValueForItem(it) {
     if (it.type === "FRAME") return "# " + it.name + ":\n" + (it.link || "");
     return it.svg || it.svgError || "";
+  }
+
+  function kindOf(it) {
+    const t = String(it.type || "");
+    const kind = t.charAt(0) + t.slice(1).toLowerCase().replace(/_/g, " ");
+    return it.width !== undefined ? kind + " · " + it.width + " × " + it.height : kind;
   }
 
   function renderSelection(items) {
@@ -449,100 +335,66 @@
     drawCheckpoint();
   }
 
-  const CP_KIND = { "+": ['used', "added"], "-": ['k-del', "removed"], "~": ['k-chg', "changed"] };
+  const CP_KIND = { "+": ["add", "Added"], "-": ["del", "Removed"], "~": ["chg", "Changed"] };
 
   function drawCheckpoint() {
-    const box = document.getElementById("cp");
+    const box = $("cp");
     if (!cp.id || !ws) {
       box.innerHTML = "";
       return fit();
     }
     let html =
-      '<div class="res-head"><span class="res-title">Checkpoint</span>' +
-      '<span class="muted" title="Saved on this computer; the file is not changed">' +
-      (cp.saved ? "Saved " + esc(cp.saved) : "Not saved yet") + "</span></div>" +
-      '<div class="cp-bar"><button class="copy-btn" data-cp="save"' + (cp.busy ? " disabled" : "") + ' title="Remember this frame as it is now">' +
+      '<div class="more"><button class="b" data-cp="save"' + (cp.busy ? " disabled" : "") + ' title="Remember this frame as it is now. Saved on this computer; the file is not changed">' +
       (cp.busy === "save" ? "Saving…" : "Save checkpoint") + "</button>" +
       (cp.saved
-        ? '<button class="copy-btn" data-cp="diff"' + (cp.busy ? " disabled" : "") + ' title="What changed in this frame since the checkpoint">' +
+        ? '<button class="b" data-cp="diff"' + (cp.busy ? " disabled" : "") + ' title="What changed in this frame since the checkpoint">' +
           (cp.busy === "diff" ? "Comparing…" : "What changed?") + "</button>"
         : "") +
-      "</div>";
-    if (cp.error) html += '<div class="k-del">' + esc(cp.error) + "</div>";
+      "<span>" + (cp.saved ? "Saved " + esc(cp.saved) : "No checkpoint yet") + "</span></div>";
+    if (cp.error) html += '<div class="more bad-text">' + esc(cp.error) + "</div>";
     else if (cp.changes) {
       html += cp.changes.length
-        ? '<div class="cp-list">' +
+        ? '<div class="card cp-list">' +
           cp.changes.map((c) => {
-            const k = CP_KIND[c.kind] || ["muted", ""];
-            return '<div class="cp-row" data-id="' + esc(c.id) + '" title="Show this layer"><span class="' + k[0] + '">' + k[1] +
-              "</span> <b>" + esc(c.name) + "</b>" + (c.detail ? ' <span class="muted">' + esc(c.detail) + "</span>" : "") + "</div>";
+            const k = CP_KIND[c.kind] || ["", ""];
+            return '<div class="li" data-id="' + esc(c.id) + '" title="Show this layer"><div class="t"><b>' + esc(c.name) + "</b>" +
+              (c.detail ? "<span>" + esc(c.detail) + "</span>" : "") + '</div><span class="tag ' + k[0] + '">' + k[1] + "</span></div>";
           }).join("") +
           "</div>" +
-          (cp.total > cp.changes.length ? '<div class="muted">First ' + cp.changes.length + " of " + cp.total + " changes.</div>" : "")
-        : '<div class="used">No changes since the checkpoint.</div>';
+          (cp.total > cp.changes.length ? '<div class="more">First ' + cp.changes.length + " of " + cp.total + " changes.</div>" : "")
+        : '<div class="more">No changes since the checkpoint.</div>';
     }
     box.innerHTML = html;
     fit();
   }
 
-  document.getElementById("cp").addEventListener("click", (e) => {
+  $("cp").addEventListener("click", (e) => {
     const btn = e.target.closest("[data-cp]");
     if (btn) return askCheckpoint(btn.dataset.cp);
-    const row = e.target.closest(".cp-row");
+    const row = e.target.closest(".li[data-id]");
     // A removed layer no longer exists; the plugin ignores a select it cannot do.
     if (row) parent.postMessage({ pluginMessage: { uiAction: "select", nodeId: row.dataset.id } }, "*");
   });
 
   function drawSelection() {
-    const box = document.getElementById("result");
-    if (!selItems.length) {
-      box.className = "";
-      box.innerHTML = "";
-      fit();
-      return;
-    }
-    const head =
-      '<div class="res-head"><span class="res-title">Selected (' + selItems.length + ")</span>" +
-      (selItems.length > 1 ? '<button class="copy-btn copy-all" data-all="1">Copy all</button>' : "") +
-      "</div>";
-
-    const body =
-      '<div class="res-list">' +
-      selItems
-        .map(
-          (it, i) =>
-            '<div class="res-row">' +
-            '<span class="res-name" title="' + esc(it.name) + '">' + esc(it.name) + "</span>" +
-            '<span class="res-type">' + esc(it.type) + "</span>" +
-            '<button class="copy-btn" data-i="' + i + '">' + copyLabelFor(it) + "</button>" +
-            "</div>",
-        )
-        .join("") +
-      "</div>";
-
-    box.innerHTML = head + body;
-    box.className = "show";
+    $("sel-sec").hidden = !selItems.length;
+    $("sel-count").textContent = selItems.length || "";
+    $("copy-all").hidden = selItems.length < 2;
+    $("result").innerHTML = selItems
+      .map(
+        (it, i) =>
+          '<div class="li"><div class="t"><b title="' + esc(it.name) + '">' + esc(it.name) + "</b><span>" + esc(kindOf(it)) + "</span></div>" +
+          '<button class="chip" data-i="' + i + '">' + copyLabelFor(it) + "</button></div>",
+      )
+      .join("");
     fit();
   }
 
   // Ask the main thread to size the window to its content.
   function fit() {
     requestAnimationFrame(() => {
-      const card = document.querySelector(".card");
-      const credit = document.getElementById("credit");
-      const h = card.getBoundingClientRect().bottom + credit.offsetHeight + 12;
-      parent.postMessage({ pluginMessage: { resize: h } }, "*");
+      parent.postMessage({ pluginMessage: { resize: $("app").getBoundingClientRect().bottom } }, "*");
     });
-  }
-
-  // What each button copies: a row copies its own value (link block for a
-  // frame, SVG otherwise); "Copy all" joins every item with a blank line between.
-  function copyValueFor(btn) {
-    if (btn.hasAttribute("data-all")) {
-      return selItems.map(copyValueForItem).join("\n\n");
-    }
-    const it = selItems[+btn.getAttribute("data-i")];
-    return it ? copyValueForItem(it) : "";
   }
 
   // navigator.clipboard is often unavailable in the plugin iframe, so use the
@@ -560,10 +412,10 @@
     document.body.removeChild(ta);
   }
 
-  document.getElementById("result").addEventListener("click", (e) => {
-    const btn = e.target.closest(".copy-btn");
-    if (!btn) return;
-    copyText(copyValueFor(btn));
+  // A row copies its own value (link block for a frame, SVG otherwise);
+  // "Copy all" joins every item with a blank line between.
+  function copied(btn, text) {
+    copyText(text);
     const old = btn.textContent;
     btn.textContent = "Copied";
     btn.classList.add("done");
@@ -571,55 +423,93 @@
       btn.textContent = old;
       btn.classList.remove("done");
     }, 1200);
+  }
+  $("result").addEventListener("click", (e) => {
+    const btn = e.target.closest(".chip");
+    const it = btn && selItems[+btn.dataset.i];
+    if (it) copied(btn, copyValueForItem(it));
   });
+  $("copy-all").onclick = (e) => copied(e.target, selItems.map(copyValueForItem).join("\n\n"));
 
   // ---- activity log: what the AI did in this file, newest first ----
   let acts = [];
-  let counts = { read: 0, write: 0, error: 0 };
+  let counts = { read: 0, write: 0, error: 0, blocked: 0 };
+  let actOpen = false;
 
   function logActivity(a) {
-    counts[a.error ? "error" : a.write ? "write" : "read"]++;
-    acts.unshift(Object.assign({ time: new Date().toTimeString().slice(0, 8) }, a));
-    acts = acts.slice(0, 5);
+    working = null;
+    counts[a.blocked ? "blocked" : a.error ? "error" : a.write ? "write" : "read"]++;
+    if (a.blocked) blocked = a.command;
+    acts.unshift(Object.assign({ time: new Date().toTimeString().slice(0, 5) }, a));
+    acts = acts.slice(0, 20);
     renderActivity();
+    paint();
   }
 
   function renderActivity() {
-    const open = document.getElementById("activity").classList.contains("open");
     const parts = [];
     if (counts.read) parts.push(counts.read + " read");
-    if (counts.write) parts.push(counts.write + " write");
-    if (counts.error) parts.push('<span class="k-del">' + counts.error + " error</span>");
-    document.getElementById("act-counts").innerHTML =
-      "AI: " + (parts.join(" · ") || "no activity") + (open ? " ▾" : " ▸");
-    document.getElementById("activity").innerHTML = acts
-      .map((a) =>
-        '<div class="act-row"' + (a.node && !a.error ? ' data-id="' + esc(a.node) + '"' : "") + ' title="' + esc(a.error || a.command) + '">' +
-        '<span class="muted">' + a.time + "</span> " +
-        (a.error ? '<span class="k-del">✗</span> ' : '<span class="used">✓</span> ') + esc(a.command) +
-        (a.write && !a.error ? ' <span class="k-chg">edit</span>' : "") +
-        (a.error ? ' <span class="muted">' + esc(a.error) + "</span>" : "") +
-        "</div>")
+    if (counts.write) parts.push(counts.write + " edit");
+    if (counts.blocked) parts.push(counts.blocked + " blocked");
+    if (counts.error) parts.push(counts.error + " failed");
+    const total = counts.read + counts.write + counts.blocked + counts.error;
+    $("act-n").textContent = total || "";
+    $("act-counts").textContent = total ? parts.join(" · ") + (actOpen ? " ⌄" : " ›") : "Nothing yet";
+    $("act-counts").disabled = !total;
+    $("act-box").hidden = !actOpen || !total;
+    $("act-h").classList.toggle("flat", !actOpen || !total);
+    $("activity").innerHTML = acts
+      .map((a) => {
+        const failed = !!a.error;
+        const sub = a.blocked ? "Blocked by Read-only" : failed ? a.error : a.name || "";
+        return '<div class="li' + (failed ? " err" : "") + '"' + (a.node && !failed ? ' data-id="' + esc(a.node) + '"' : "") +
+          ' title="' + esc(a.error || a.command) + '"><div class="t"><b>' + esc(human(a.command)) + "</b>" +
+          (sub ? "<span>" + esc(sub) + "</span>" : "") + "</div>" +
+          (a.write && !failed ? '<span class="tag">Edit</span>' : "") +
+          '<span class="tm">' + a.time + "</span></div>";
+      })
       .join("");
     fit();
   }
 
-  document.getElementById("readonly").onchange = (e) =>
-    parent.postMessage({ pluginMessage: { setReadOnly: e.target.checked } }, "*");
-  document.getElementById("act-clear").onclick = () => {
+  // ---- Read-only switch: the main thread enforces it, this only asks ----
+  function showReadOnly(on) {
+    $("readonly").setAttribute("aria-checked", on ? "true" : "false");
+    $("ro-note").textContent = on ? "AI can read this file, not change it" : "AI can change this file";
+    $("ro-note").className = on ? "" : "warn";
+  }
+  function setReadOnly(on) {
+    showReadOnly(on);
+    if (!on) blocked = null;
+    parent.postMessage({ pluginMessage: { setReadOnly: on } }, "*");
+    paint();
+  }
+  $("readonly").onclick = () => setReadOnly($("readonly").getAttribute("aria-checked") !== "true");
+  $("notice").addEventListener("click", (e) => {
+    const act = e.target.dataset && e.target.dataset.act;
+    if (act === "allow") setReadOnly(false);
+    if (act === "dismiss") { blocked = null; paint(); }
+  });
+
+  $("act-clear").onclick = () => {
     acts = [];
-    counts = { read: 0, write: 0, error: 0 };
+    counts = { read: 0, write: 0, error: 0, blocked: 0 };
+    actOpen = false;
     renderActivity();
   };
-  document.getElementById("act-counts").onclick = () => {
-    document.getElementById("activity").classList.toggle("open");
+  $("act-counts").onclick = () => {
+    actOpen = !actOpen;
     renderActivity();
   };
-  renderActivity();
-  document.getElementById("activity").addEventListener("click", (e) => {
-    const row = e.target.closest(".act-row[data-id]");
+  $("activity").addEventListener("click", (e) => {
+    const row = e.target.closest(".li[data-id]");
     if (row) parent.postMessage({ pluginMessage: { uiAction: "select", nodeId: row.dataset.id } }, "*");
   });
+  $("min").onclick = () => {
+    minimized = !minimized;
+    paint();
+  };
+  $("retry").onclick = () => connect();
 
   // Relay plugin main-thread frames: the register frame is cached here and
   // re-sent on every reconnect, the selection frame drives the list above, and
@@ -630,7 +520,18 @@
     if (msg.register) {
       reg = msg.register;
       sendRegister();
-      if (ws) setStatus(true, label());
+      showReadOnly(reg.read_only !== false);
+      paint();
+      return;
+    }
+    if (msg.page !== undefined) {
+      page = msg.page;
+      paint();
+      return;
+    }
+    if (msg.working !== undefined) {
+      working = msg.working;
+      paint();
       return;
     }
     if (Array.isArray(msg.selection)) {
@@ -647,20 +548,16 @@
       syncCheckpoint();
       return;
     }
-    if (msg.readOnly !== undefined) {
-      document.getElementById("readonly").checked = msg.readOnly;
-      return;
-    }
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(msg));
     }
   };
 
-  document.getElementById("status-row").onclick = () => connect();
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden && !ws) connect();
   });
 
   connect();
-  fit();
+  renderActivity();
+  paint();
 </script>

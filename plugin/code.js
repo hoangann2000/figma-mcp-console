@@ -2,7 +2,9 @@
 // Receives {id, command, params} from the Go bridge (relayed through ui.html),
 // executes it against the Figma Plugin API, and replies {id, result|error}.
 
-figma.showUI(__html__, { width: 280, height: 104 });
+// themeColors puts figma-light / figma-dark on the UI's <html>, so the window
+// follows the user's Figma theme.
+figma.showUI(__html__, { width: 320, height: 120, themeColors: true });
 
 // Tell the UI which file this plugin window runs in; the UI forwards it to
 // the bridge on every (re)connect so calls can be routed per file when
@@ -1913,6 +1915,7 @@ async function postSelection() {
   const items = [];
   for (const n of sel) {
     const item = { id: n.id, name: n.name, type: n.type, link: nodeLink(n.id) };
+    if ("width" in n) { item.width = Math.round(n.width); item.height = Math.round(n.height); }
     // Frames are copied as links; every other element (vectors, instances, …)
     // is copied as SVG, so pre-export it now to keep the UI copy synchronous
     // (clipboard writes must happen inside the click gesture). Skip huge
@@ -1930,6 +1933,10 @@ async function postSelection() {
   figma.ui.postMessage({ selection: items });
 }
 figma.on("selectionchange", postSelection);
+// The window names the open page, which tools act on and the user can change.
+const postPage = () => figma.ui.postMessage({ page: figma.currentPage.name });
+figma.on("currentpagechange", postPage);
+postPage();
 postSelection();
 
 // ---------- activity log clicks ----------
@@ -1960,7 +1967,7 @@ figma.ui.onmessage = async (msg) => {
   if (!msg) return;
   // The window measures its content after every render.
   if (msg.resize) {
-    figma.ui.resize(280, Math.max(104, Math.min(600, Math.round(msg.resize))));
+    figma.ui.resize(320, Math.max(60, Math.min(640, Math.round(msg.resize))));
     return;
   }
   if (msg.uiAction) {
@@ -1980,15 +1987,25 @@ figma.ui.onmessage = async (msg) => {
   try {
     if (!h) throw new Error("unknown command: " + msg.command);
     if (readOnly && act.write) {
-      figma.notify("AI tried to edit this file (" + msg.command + ") and was blocked. Untick Read-only in Figma MCP Console to allow edits.", { timeout: 8000 });
+      act.blocked = true;
+      figma.notify("AI tried to edit this file (" + msg.command + ") and was blocked. Turn off Read-only in Figma MCP Console to allow edits.", { timeout: 8000 });
       throw new Error(msg.command + " was blocked: read-only mode is on in this file's Figma MCP Console window. " +
         "Tell the user; they can turn it off there if the edit is intended.");
     }
+    // Lets the window say "Editing" while a write runs, not only afterwards.
+    if (act.write) figma.ui.postMessage({ working: msg.command });
     const result = await h(p);
     figma.ui.postMessage({ id: msg.id, result: result === undefined ? null : result });
   } catch (e) {
     act.error = explainError(String((e && e.message) || e));
     figma.ui.postMessage({ id: msg.id, error: act.error });
+  }
+  // The log names the layer, not just its id; a deleted one keeps the id only.
+  if (act.node) {
+    try {
+      const n = await figma.getNodeByIdAsync(act.node);
+      if (n) act.name = n.name;
+    } catch (e) {}
   }
   figma.ui.postMessage({ activity: act });
 };
