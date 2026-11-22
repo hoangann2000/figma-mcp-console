@@ -3,14 +3,14 @@
   :root {
     --bg: #ffffff; --fg: #141414; --muted: #737373; --line: #ededed; --soft: #f5f5f5; --card: #ffffff;
     --ok: #1f9d57; --wait: #d98a00; --bad: #d93838; --bad-bg: #fdecec; --accent: #d9480f; --accent-bg: #fff1e7;
-    --track: #cfcfcf; --on: #141414; --on-fg: #ffffff;
+    --track: #cfcfcf; --on: #141414; --on-fg: #ffffff; --sw-on: #1f9d57;
   }
   /* "dark" is set by applyTheme(): Figma's own theme (figma-dark on <html>,
      from showUI themeColors) unless the user picked one with the footer button. */
   .dark {
-    --bg: #2c2c2c; --fg: #f4f4f4; --muted: #9c9c9c; --line: #3d3d3d; --soft: #383838; --card: #303030;
-    --ok: #4ccf85; --wait: #f0b840; --bad: #ff7070; --bad-bg: #402626; --accent: #ff9458; --accent-bg: #3d2a1e;
-    --track: #5c5c5c; --on: #f4f4f4; --on-fg: #141414;
+    --bg: #1e1e1e; --fg: #ededed; --muted: #8f8f8f; --line: #2f2f2f; --soft: #2b2b2b; --card: #252525;
+    --ok: #3ecf8e; --wait: #f5b041; --bad: #ff6b70; --bad-bg: rgba(255, 107, 112, 0.12); --accent: #ff9248; --accent-bg: rgba(255, 146, 72, 0.12);
+    --track: #4a4a4a; --on: #ededed; --on-fg: #171717; --sw-on: #2f9e69;
   }
   html, body { margin: 0; }
   body { font: 13px/1.4 Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--fg); background: var(--bg); }
@@ -41,7 +41,7 @@
 
   .sw { width: 38px; height: 22px; border-radius: 99px; border: 0; background: var(--track); position: relative; cursor: pointer; padding: 0; flex: none; transition: background 0.15s; }
   .sw::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform 0.15s; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); }
-  .sw[aria-checked="true"] { background: var(--ok); }
+  .sw[aria-checked="true"] { background: var(--sw-on); }
   .sw[aria-checked="true"]::after { transform: translateX(16px); }
 
   .h { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
@@ -74,6 +74,11 @@
   .b.wide { width: 100%; justify-content: center; }
   .msg { border-radius: 12px; padding: 12px; background: var(--accent-bg); }
   .msg.bad { background: var(--bad-bg); }
+  /* On dark, a tinted fill turns muddy: use a neutral card with a tinted edge and title. */
+  .dark .msg { background: var(--card); border: 1px solid rgba(255, 146, 72, 0.4); }
+  .dark .msg b { color: var(--accent); }
+  .dark .msg.bad { border-color: rgba(255, 107, 112, 0.45); }
+  .dark .msg.bad b { color: var(--bad); }
   .msg b { display: block; font-size: 13.5px; margin-bottom: 2px; }
   .msg p { margin: 0 0 10px; font-size: 12.5px; opacity: 0.85; overflow-wrap: anywhere; }
   .msg .a { display: flex; gap: 6px; }
