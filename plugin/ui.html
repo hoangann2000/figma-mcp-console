@@ -412,10 +412,22 @@
   }
 
   // Ask the main thread to size the window to its content.
+  const MAX_H = 640; // the window's height limit, same number as in code.js
   function fit() {
     requestAnimationFrame(() => {
+      // Past the limit the whole window would scroll, a second scrollbar next
+      // to the log's own: the log gives up the excess instead.
+      const act = $("activity"), top = act.scrollTop;
+      act.style.maxHeight = "";
       // Rounded up: half a pixel short is enough to show a scrollbar.
-      parent.postMessage({ pluginMessage: { resize: Math.ceil($("app").getBoundingClientRect().bottom) } }, "*");
+      let h = Math.ceil($("app").getBoundingClientRect().bottom);
+      if (h > MAX_H && act.offsetHeight) {
+        const keep = Math.max(96, act.offsetHeight - (h - MAX_H));
+        h -= act.offsetHeight - keep;
+        act.style.maxHeight = keep + "px";
+      }
+      act.scrollTop = top;
+      parent.postMessage({ pluginMessage: { resize: h } }, "*");
     });
   }
 
