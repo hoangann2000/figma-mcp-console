@@ -18,8 +18,6 @@
   .sec { padding: 14px 16px; }
   .sec + .sec { border-top: 1px solid var(--line); }
   .hd, .row { display: flex; align-items: center; gap: 12px; }
-  .logo { width: 36px; height: 36px; border-radius: 10px; background: #141414; display: grid; place-items: center; flex: none; }
-  .logo svg { width: 20px; height: 20px; }
   .ttl, .t { flex: 1; min-width: 0; }
   .ttl b { display: block; font-size: 15px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .ttl span, .t span { display: block; color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -86,7 +84,6 @@
 <div id="app">
   <div class="sec">
     <div class="hd">
-      <span class="logo"><svg viewBox="0 0 20 20" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="14" height="14" rx="3"/><path d="M7.5 8l2.5 2-2.5 2M11.5 12.5h2"/></svg></span>
       <div class="ttl"><b id="file">Figma file</b><span id="page"></span></div>
       <span class="st"><span id="dot" class="wait"></span><span id="status">Searching</span></span>
       <button class="ib" id="min" aria-label="Minimize" title="Minimize"></button>
@@ -96,7 +93,7 @@
     <div class="sec" id="notice" hidden></div>
     <div class="sec">
       <div class="row">
-        <div class="t"><b>Read-only</b><span id="ro-note">AI can read this file, not change it</span></div>
+        <div class="t"><b>Read-only</b><span id="ro-note" class="warn" hidden>AI can change this file</span></div>
         <button class="sw" id="readonly" role="switch" aria-checked="true" aria-label="Read-only" title="Refuse every AI command that would change this file"></button>
       </div>
     </div>
@@ -107,7 +104,7 @@
       <div id="cp"></div>
     </div>
     <div class="sec">
-      <div class="h flat" id="act-h"><b>AI activity</b><i id="act-n"></i><button class="r" id="act-counts" title="Show or hide what the AI did in this file"></button></div>
+      <div class="h flat" id="act-h"><b>AI activity</b><button class="r" id="act-counts" title="Show or hide what the AI did in this file"></button></div>
       <div id="act-box" hidden>
         <div class="card" id="activity"></div>
         <div class="more"><button class="b txt" id="act-clear" style="padding:0">Clear log</button></div>
@@ -162,26 +159,28 @@
   function paint() {
     const connected = !!ws;
     $("file").textContent = reg ? reg.name : "Figma file";
-    $("page").textContent = !connected ? "Waiting for your AI client" : page ? "Page: " + page : "";
+    $("page").textContent = !connected ? "Waiting for your AI client" : page;
     let dot = "ok", word = "Connected";
     if (!connected) { dot = "wait"; word = "Searching"; }
     else if (behind) { dot = ""; word = "Outdated"; }
     else if (working) { dot = "busy"; word = "Editing"; }
     $("dot").className = dot;
     $("status").textContent = word;
-    $("version").textContent = serverVersion ? "v" + serverVersion : "";
+    // "dev" is a local build, not a version anyone can look up.
+    const version = serverVersion && serverVersion !== "dev" ? "v" + serverVersion : "";
+    $("version").textContent = version;
     $("retry-sec").hidden = connected;
 
     // One notice at a time; a version mismatch outranks a blocked edit.
     const n = $("notice");
     let html = "";
     if (connected && behind === "plugin") {
-      html = '<div class="msg bad"><b>Update the plugin</b><p>The server' + (serverVersion ? " (v" + esc(serverVersion) + ")" : "") +
-        " is newer than this plugin. Tools added since will fail until you update.</p>" +
+      html = '<div class="msg bad"><b>Update the plugin</b><p>The server' + (version ? " (" + esc(version) + ")" : "") +
+        " is newer than this plugin.</p>" +
         '<div class="a"><a class="b pri" href="' + RELEASES + '" target="_blank">Get the new plugin</a></div></div>';
     } else if (connected && behind === "server") {
-      html = '<div class="msg bad"><b>Restart your AI client</b><p>This plugin is newer than the server it reached' +
-        (serverVersion ? " (v" + esc(serverVersion) + ")" : "") + ". Restarting the client starts the current server.</p></div>";
+      html = '<div class="msg bad"><b>Restart your AI client</b><p style="margin:0">The server' + (version ? " (" + esc(version) + ")" : "") +
+        " is older than this plugin.</p></div>";
     } else if (blocked) {
       html = '<div class="msg"><b>AI tried to edit this file</b><p>Blocked: <code>' + esc(blocked) +
         "</code>. Turn off Read-only if the edit is intended, then ask the AI again.</p>" +
@@ -335,6 +334,13 @@
     drawCheckpoint();
   }
 
+  // "2026-11-22 09:53" -> "22 Nov 09:53"
+  function shortDate(s) {
+    const m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}:\d{2})/.exec(s || "");
+    if (!m) return s || "";
+    return +m[3] + " " + ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][+m[2] - 1] + " " + m[4];
+  }
+
   const CP_KIND = { "+": ["add", "Added"], "-": ["del", "Removed"], "~": ["chg", "Changed"] };
 
   function drawCheckpoint() {
@@ -350,7 +356,8 @@
         ? '<button class="b" data-cp="diff"' + (cp.busy ? " disabled" : "") + ' title="What changed in this frame since the checkpoint">' +
           (cp.busy === "diff" ? "Comparing…" : "What changed?") + "</button>"
         : "") +
-      "<span>" + (cp.saved ? "Saved " + esc(cp.saved) : "No checkpoint yet") + "</span></div>";
+      "<span>" + (cp.saved ? "Saved " + esc(shortDate(cp.saved)) : "No checkpoint yet") +
+      (cp.changes && !cp.changes.length && !cp.error ? " · no changes" : "") + "</span></div>";
     if (cp.error) html += '<div class="more bad-text">' + esc(cp.error) + "</div>";
     else if (cp.changes) {
       html += cp.changes.length
@@ -362,7 +369,7 @@
           }).join("") +
           "</div>" +
           (cp.total > cp.changes.length ? '<div class="more">First ' + cp.changes.length + " of " + cp.total + " changes.</div>" : "")
-        : '<div class="more">No changes since the checkpoint.</div>';
+        : "";
     }
     box.innerHTML = html;
     fit();
@@ -378,7 +385,7 @@
 
   function drawSelection() {
     $("sel-sec").hidden = !selItems.length;
-    $("sel-count").textContent = selItems.length || "";
+    $("sel-count").textContent = selItems.length > 1 ? selItems.length : "";
     $("copy-all").hidden = selItems.length < 2;
     $("result").innerHTML = selItems
       .map(
@@ -453,7 +460,6 @@
     if (counts.blocked) parts.push(counts.blocked + " blocked");
     if (counts.error) parts.push(counts.error + " failed");
     const total = counts.read + counts.write + counts.blocked + counts.error;
-    $("act-n").textContent = total || "";
     $("act-counts").textContent = total ? parts.join(" · ") + (actOpen ? " ⌄" : " ›") : "Nothing yet";
     $("act-counts").disabled = !total;
     $("act-box").hidden = !actOpen || !total;
@@ -475,8 +481,7 @@
   // ---- Read-only switch: the main thread enforces it, this only asks ----
   function showReadOnly(on) {
     $("readonly").setAttribute("aria-checked", on ? "true" : "false");
-    $("ro-note").textContent = on ? "AI can read this file, not change it" : "AI can change this file";
-    $("ro-note").className = on ? "" : "warn";
+    $("ro-note").hidden = on; // the warning matters only while edits are allowed
   }
   function setReadOnly(on) {
     showReadOnly(on);
