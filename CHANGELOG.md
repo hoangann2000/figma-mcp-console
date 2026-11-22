@@ -4,6 +4,17 @@ All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 `npm/package.json`.
 
+## [Unreleased]
+
+No plugin protocol change, but the plugin code changed: re-import it to get
+this.
+
+### Fixed
+
+- The plugin window no longer scrolls as a whole, with a second scrollbar next
+  to the activity log's own, when a selection and the open log together are
+  taller than the window's 640 px limit: the log gets shorter instead.
+
 ## [0.10.0] - 2026-11-22
 
 No plugin protocol change, but the plugin code changed: re-import it to get
