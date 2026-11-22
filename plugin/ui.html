@@ -13,6 +13,8 @@
     --track: #4a4a4a; --on: #ededed; --on-fg: #171717; --sw-on: #2f9e69;
   }
   html, body { margin: 0; }
+  :root { color-scheme: light; }
+  .dark { color-scheme: dark; } /* native scrollbars follow the theme */
   body { font: 13px/1.4 Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--fg); background: var(--bg); }
   [hidden] { display: none !important; }
 
@@ -72,10 +74,11 @@
   .b.pri:hover { filter: brightness(1.15); background: var(--on); }
   .b.txt { border-color: transparent; background: none; color: var(--muted); font-weight: 500; padding: 0 8px; }
   .b.wide { width: 100%; justify-content: center; }
-  .msg { border-radius: 12px; padding: 12px; background: var(--accent-bg); }
+  /* The border is always there (transparent on light) so both themes are the same height. */
+  .msg { border-radius: 12px; padding: 12px; background: var(--accent-bg); border: 1px solid transparent; }
   .msg.bad { background: var(--bad-bg); }
   /* On dark, a tinted fill turns muddy: use a neutral card with a tinted edge and title. */
-  .dark .msg { background: var(--card); border: 1px solid rgba(255, 146, 72, 0.4); }
+  .dark .msg { background: var(--card); border-color: rgba(255, 146, 72, 0.4); }
   .dark .msg b { color: var(--accent); }
   .dark .msg.bad { border-color: rgba(255, 107, 112, 0.45); }
   .dark .msg.bad b { color: var(--bad); }
@@ -411,7 +414,8 @@
   // Ask the main thread to size the window to its content.
   function fit() {
     requestAnimationFrame(() => {
-      parent.postMessage({ pluginMessage: { resize: $("app").getBoundingClientRect().bottom } }, "*");
+      // Rounded up: half a pixel short is enough to show a scrollbar.
+      parent.postMessage({ pluginMessage: { resize: Math.ceil($("app").getBoundingClientRect().bottom) } }, "*");
     });
   }
 
@@ -540,6 +544,7 @@
     t.innerHTML = dark ? ICON_SUN : ICON_MOON;
     t.title = dark ? "Switch to light" : "Switch to dark";
     t.setAttribute("aria-label", t.title);
+    fit();
   }
   $("theme").onclick = () => {
     const want = root.classList.contains("dark") ? "light" : "dark";
