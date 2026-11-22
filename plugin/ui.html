@@ -17,6 +17,8 @@
 
   .sec { padding: 14px 16px; }
   .sec + .sec { border-top: 1px solid var(--line); }
+  /* A notice belongs to the header above it: no rule between them, no double padding. */
+  #notice { border-top: 0; padding-top: 0; }
   .hd, .row { display: flex; align-items: center; gap: 12px; }
   .ttl, .t { flex: 1; min-width: 0; }
   .ttl b { display: block; font-size: 15px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
