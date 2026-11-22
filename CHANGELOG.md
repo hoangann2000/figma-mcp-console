@@ -4,7 +4,7 @@ All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 `npm/package.json`.
 
-## [Unreleased]
+## [0.10.1] - 2026-11-22
 
 No plugin protocol change, but the plugin code changed: re-import it to get
 this.
