@@ -5,8 +5,9 @@
     --ok: #1f9d57; --wait: #d98a00; --bad: #d93838; --bad-bg: #fdecec; --accent: #d9480f; --accent-bg: #fff1e7;
     --track: #cfcfcf; --on: #141414; --on-fg: #ffffff;
   }
-  /* Figma adds figma-dark to <html> (showUI themeColors) when its theme is dark. */
-  .figma-dark {
+  /* "dark" is set by applyTheme(): Figma's own theme (figma-dark on <html>,
+     from showUI themeColors) unless the user picked one with the footer button. */
+  .dark {
     --bg: #2c2c2c; --fg: #f4f4f4; --muted: #9c9c9c; --line: #3d3d3d; --soft: #383838; --card: #303030;
     --ok: #4ccf85; --wait: #f0b840; --bad: #ff7070; --bad-bg: #402626; --accent: #ff9458; --accent-bg: #3d2a1e;
     --track: #5c5c5c; --on: #f4f4f4; --on-fg: #141414;
@@ -79,7 +80,10 @@
   .msg code { font: 12px ui-monospace, Menlo, monospace; }
   .cp-list { margin-top: 10px; }
   .foot { display: flex; padding: 10px 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
-  .foot a { margin-left: auto; color: var(--muted); text-decoration: none; }
+  .foot { align-items: center; }
+  .foot a { color: var(--muted); text-decoration: none; }
+  .foot .ib { margin: -6px 6px -6px auto; width: 24px; height: 24px; }
+  .foot .ib svg { width: 14px; height: 14px; }
   .foot a:hover { color: var(--fg); }
 </style>
 
@@ -112,7 +116,7 @@
         <div class="more"><button class="b txt" id="act-clear" style="padding:0">Clear log</button></div>
       </div>
     </div>
-    <div class="foot"><span id="version"></span><a href="https://github.com/hoangann2000/figma-mcp-console#readme" target="_blank">Help</a></div>
+    <div class="foot"><span id="version"></span><button class="ib" id="theme"></button><a href="https://github.com/hoangann2000/figma-mcp-console#readme" target="_blank">Help</a></div>
   </div>
 </div>
 
@@ -518,6 +522,34 @@
   };
   $("retry").onclick = () => connect();
 
+  // ---- theme: follows Figma until the user picks one; the choice is kept ----
+  const ICON_MOON = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13 9.5A5.5 5.5 0 0 1 6.5 3a5.500 5.500 0 1 0 6.500 6.500z"/></svg>';
+  const ICON_SUN = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="8" cy="8" r="2.800"/><path d="M8 1.500v1.500M8 13v1.500M1.500 8H3M13 8h1.500M3.400 3.400l1.100 1.100M11.500 11.500l1.100 1.100M3.400 12.600l1.100-1.100M11.500 4.500l1.100-1.100"/></svg>';
+  const root = document.documentElement;
+  let theme = "auto"; // auto | light | dark
+  const figmaDark = () => root.classList.contains("figma-dark");
+  function applyTheme() {
+    const dark = theme === "auto" ? figmaDark() : theme === "dark";
+    root.classList.toggle("dark", dark);
+    const t = $("theme");
+    t.innerHTML = dark ? ICON_SUN : ICON_MOON;
+    t.title = dark ? "Switch to light" : "Switch to dark";
+    t.setAttribute("aria-label", t.title);
+  }
+  $("theme").onclick = () => {
+    const want = root.classList.contains("dark") ? "light" : "dark";
+    // Picking what Figma already uses goes back to following Figma.
+    theme = want === (figmaDark() ? "dark" : "light") ? "auto" : want;
+    applyTheme();
+    parent.postMessage({ pluginMessage: { setTheme: theme } }, "*");
+  };
+  // Figma swaps figma-light / figma-dark on <html> when its theme changes.
+  new MutationObserver(() => {
+    const dark = theme === "auto" ? figmaDark() : theme === "dark";
+    if (dark !== root.classList.contains("dark")) applyTheme();
+  }).observe(root, { attributes: true, attributeFilter: ["class"] });
+  applyTheme();
+
   // Relay plugin main-thread frames: the register frame is cached here and
   // re-sent on every reconnect, the selection frame drives the list above, and
   // everything else goes to the server.
@@ -529,6 +561,11 @@
       sendRegister();
       showReadOnly(reg.read_only !== false);
       paint();
+      return;
+    }
+    if (msg.theme !== undefined) {
+      theme = msg.theme === "light" || msg.theme === "dark" ? msg.theme : "auto";
+      applyTheme();
       return;
     }
     if (msg.page !== undefined) {

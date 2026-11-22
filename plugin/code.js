@@ -1934,6 +1934,7 @@ async function postSelection() {
 }
 figma.on("selectionchange", postSelection);
 // The window names the open page, which tools act on and the user can change.
+figma.clientStorage.getAsync("theme").then((t) => t && figma.ui.postMessage({ theme: t }), () => {});
 const postPage = () => figma.ui.postMessage({ page: figma.currentPage.name });
 figma.on("currentpagechange", postPage);
 postPage();
@@ -1973,6 +1974,11 @@ figma.ui.onmessage = async (msg) => {
   if (msg.uiAction) {
     // A log row whose layer was deleted since: nothing to select.
     await uiAction(msg).catch(() => {});
+    return;
+  }
+  if (msg.setTheme !== undefined) {
+    // The window's light/dark choice outlives the session; "auto" follows Figma.
+    await figma.clientStorage.setAsync("theme", msg.setTheme).catch(() => {});
     return;
   }
   if (msg.setReadOnly !== undefined) {
