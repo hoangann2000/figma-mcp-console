@@ -6,6 +6,36 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+No plugin protocol change, but the plugin code changed: re-import it to get
+these.
+
+### Changed
+
+- **New plugin window.** 320 px wide, larger type, one heading per block:
+  - the header shows the file, the open page and the state in one word
+    (Connected, Editing while a write runs, Searching, Outdated), with a
+    button to collapse the window to that header;
+  - Read-only is a switch with a line saying what it means;
+  - when Read-only blocks the AI, the window says which command and offers
+    "Allow edits"; a version mismatch names the side to update and links to
+    the latest plugin;
+  - selected layers and the activity log are lists of rows, the log in plain
+    words with the layer's name, 20 entries deep;
+  - it follows Figma's light or dark theme.
+- `set_auto_layout` takes `node_ids` like the other `set_*` tools, so a list
+  of frames gets the same layout in one call. `node_id` works as before.
+- **`audit_design` touch targets** (`min_touch`): the outermost control is the
+  tap target, so icons inside a button or menu item are no longer candidates;
+  icons that act on their own (close, trash, edit, eye, copy, calendar, …)
+  now are, unless a wrapper of the required size holds only that icon. Each
+  finding says why the layer counts (`because`: prototype link, name, action
+  icon). On a real password screen this reports the two 20 px eye icons and
+  none of the decorative ticks.
+- **`audit_design` `measure_text`**: measures fixed-size text exactly by
+  letting a copy grow to the height it needs, then removing the copy in the
+  same step. It is a write, so it only runs with Read-only off; otherwise the
+  estimate is used and the result says so.
+
 ## [0.9.0] - 2026-11-21
 
 ### Upgrading from 0.8.x

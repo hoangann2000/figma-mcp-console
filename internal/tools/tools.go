@@ -119,10 +119,11 @@ type createShapeArgs struct {
 
 type auditArgs struct {
 	fileArg
-	NodeID     string   `json:"node_id" jsonschema:"frame, section or component to audit, e.g. \"12:34\""`
-	Checks     []string `json:"checks,omitempty" jsonschema:"which checks to run: layout, contrast (default: both)"`
-	MinTouch   float64  `json:"min_touch,omitempty" jsonschema:"also report controls smaller than this many pixels on either side, e.g. 44 for a mobile screen. Off by default: desktop designs fail it by design"`
-	MaxResults int      `json:"max_results,omitempty" jsonschema:"maximum findings to list (default 100); the summary always counts all of them"`
+	NodeID      string   `json:"node_id" jsonschema:"frame, section or component to audit, e.g. \"12:34\""`
+	Checks      []string `json:"checks,omitempty" jsonschema:"which checks to run: layout, contrast (default: both)"`
+	MinTouch    float64  `json:"min_touch,omitempty" jsonschema:"also report controls smaller than this many pixels on either side, e.g. 44 for a mobile screen. Off by default: desktop designs fail it by design"`
+	MaxResults  int      `json:"max_results,omitempty" jsonschema:"maximum findings to list (default 100); the summary always counts all of them"`
+	MeasureText bool     `json:"measure_text,omitempty" jsonschema:"measure fixed-size text exactly instead of estimating it: a copy of each such layer is added, measured and removed within the call. Needs Read-only off; while it is on the estimate is used"`
 }
 
 type batchOp struct {
@@ -408,7 +409,7 @@ type deleteArgs struct {
 
 type autoLayoutArgs struct {
 	fileArg
-	NodeID            string   `json:"node_id" jsonschema:"frame or component node ID"`
+	nodeTarget
 	LayoutMode        string   `json:"layout_mode" jsonschema:"HORIZONTAL, VERTICAL, or NONE to remove auto-layout"`
 	ItemSpacing       *float64 `json:"item_spacing,omitempty" jsonschema:"gap between children in pixels"`
 	Padding           *float64 `json:"padding,omitempty" jsonschema:"uniform padding on all four sides"`
@@ -422,7 +423,6 @@ type autoLayoutArgs struct {
 	CounterAxisSizing string   `json:"counter_axis_sizing,omitempty" jsonschema:"FIXED or AUTO (hug contents)"`
 	LayoutWrap        string   `json:"layout_wrap,omitempty" jsonschema:"WRAP so children flow onto new rows when they run out of width (HORIZONTAL only), or NO_WRAP"`
 	CounterAxisGap    *float64 `json:"counter_axis_spacing,omitempty" jsonschema:"gap between wrapped rows in pixels; needs layout_wrap WRAP"`
-	Verbose           bool     `json:"verbose,omitempty" jsonschema:"return the full node summary instead of just the id"`
 }
 
 type layoutChildArgs struct {

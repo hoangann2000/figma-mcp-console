@@ -2,7 +2,9 @@
 // Receives {id, command, params} from the Go bridge (relayed through ui.html),
 // executes it against the Figma Plugin API, and replies {id, result|error}.
 
-figma.showUI(__html__, { width: 280, height: 104 });
+// themeColors puts figma-light / figma-dark on the UI's <html>, so the window
+// follows the user's Figma theme.
+figma.showUI(__html__, { width: 320, height: 120, themeColors: true });
 
 // Tell the UI which file this plugin window runs in; the UI forwards it to
 // the bridge on every (re)connect so calls can be routed per file when
@@ -533,11 +535,30 @@ function inDisabledControl(n) {
 
 // Layers a finger is expected to hit: anything wired in the prototype, or
 // named like a control.
-const CONTROL_NAME = /\b(button|btn|link|tab|chip|checkbox|radio|switch|toggle|icon[-_ ]?button)\b/i;
+const CONTROL_NAME = /\b(button|btn|link|tab|chip|checkbox|radio|switch|toggle|icon[-_ ]?button|menu[-_ ]?item|nav[-_ ]?item)\b/i;
 
-function isControl(n) {
-  if ("reactions" in n && n.reactions && n.reactions.length) return true;
-  return (n.type === "INSTANCE" || n.type === "FRAME" || n.type === "COMPONENT") && CONTROL_NAME.test(n.name);
+// Icons that are a control by themselves when nothing bigger wraps them: the
+// x on a tag, the eye in a password field, row actions in a table. Chosen from
+// the small instances of a real product file; decorative icons (check-circle,
+// arrows inside buttons, menu glyphs) are not on the list or sit in a control.
+const ICON_ACTION = /(^|[\/\s_.-])(x|close|clear|trash|delete|remove|edit|eye|eye-slash|eye-off|copy|more|kebab|dots|menu|filter|sort|download|upload|refresh|settings|bell|notification|calendar|clock|search|back|arrow-left|chevron-left)([-_\s.]|icons?|$)/i;
+
+// Why a layer counts as something to tap, or null.
+function controlReason(n) {
+  if ("reactions" in n && n.reactions && n.reactions.length) return "prototype link";
+  if (n.type !== "INSTANCE" && n.type !== "FRAME" && n.type !== "COMPONENT") return null;
+  if (CONTROL_NAME.test(n.name)) return "name";
+  if (n.type === "INSTANCE" && ICON_ACTION.test(n.name)) return "action icon";
+  return null;
+}
+
+// An icon in a wrapper that is big enough and holds nothing else already has
+// its hit area: the wrapper.
+function paddedHitArea(n, min) {
+  const p = n.parent;
+  if (!p || !p.absoluteBoundingBox || !p.children) return false;
+  const b = p.absoluteBoundingBox;
+  return b.width >= min - EPS && b.height >= min - EPS && p.children.filter((c) => c.visible !== false).length === 1;
 }
 
 // "$2" in a batch op's params stands for the id of the node op 2 produced,
@@ -603,6 +624,33 @@ function explainError(message) {
       "if it names a node id, check the id with find_nodes.";
   }
   return message;
+}
+
+function applyAutoLayout(n, params) {
+  if (!("layoutMode" in n)) throw new Error("node " + n.id + " does not support auto-layout");
+  n.layoutMode = params.layout_mode;
+  if (params.layout_mode === "NONE") return;
+
+  if (params.item_spacing !== undefined) n.itemSpacing = params.item_spacing;
+  if (params.padding !== undefined) {
+    n.paddingTop = n.paddingRight = n.paddingBottom = n.paddingLeft = params.padding;
+  }
+  if (params.padding_top !== undefined) n.paddingTop = params.padding_top;
+  if (params.padding_right !== undefined) n.paddingRight = params.padding_right;
+  if (params.padding_bottom !== undefined) n.paddingBottom = params.padding_bottom;
+  if (params.padding_left !== undefined) n.paddingLeft = params.padding_left;
+  if (params.primary_axis_align) n.primaryAxisAlignItems = params.primary_axis_align;
+  if (params.counter_axis_align) n.counterAxisAlignItems = params.counter_axis_align;
+  if (params.layout_wrap) {
+    if (params.layout_wrap === "WRAP" && n.layoutMode !== "HORIZONTAL") throw new Error("layout_wrap WRAP needs layout_mode HORIZONTAL");
+    n.layoutWrap = params.layout_wrap;
+  }
+  if (params.counter_axis_spacing !== undefined && params.counter_axis_spacing !== null) {
+    if (n.layoutWrap !== "WRAP") throw new Error("counter_axis_spacing is the gap between wrapped rows: set layout_wrap WRAP first");
+    n.counterAxisSpacing = params.counter_axis_spacing;
+  }
+  if (params.primary_axis_sizing) n.primaryAxisSizingMode = params.primary_axis_sizing;
+  if (params.counter_axis_sizing) n.counterAxisSizingMode = params.counter_axis_sizing;
 }
 
 // ---------- command handlers (names match MCP tool names) ----------
@@ -776,11 +824,15 @@ const handlers = {
       if (issues.length < max) issues.push(Object.assign({ id: n.id, name: n.name, issue }, detail));
     };
     let insideInstances = 0;
+    // measure_text clones text layers to measure them, which is a write: it is
+    // skipped, and said so, while Read-only is on.
+    const measure = !!params.measure_text && !readOnly;
+    const toMeasure = [];
     // clip: the visible window left by every clipping ancestor, or null.
     // inInstance: geometry inside an instance belongs to its component and
     // cannot be fixed on this screen (an icon's vector parts poking out of its
     // own frame), so only contrast and touch size are checked there.
-    const walk = (n, clip, parentCut, inInstance) => {
+    const walk = (n, clip, parentCut, inInstance, inControl) => {
       if (n.visible === false) return;
       const box = n.absoluteBoundingBox;
       if (!box) return;
@@ -816,8 +868,10 @@ const handlers = {
           // shortcut: half the font size per character is a lower bound on
           // width, so this only catches clear cases; measuring needs a clone,
           // and an audit must not touch the document.
-          if ((n.textTruncation === "ENDING" || n.textAutoResize === "TRUNCATE") &&
-              (n.characters || "").length * size * 0.5 > box.width * lines) {
+          const truncates = n.textTruncation === "ENDING" || n.textAutoResize === "TRUNCATE";
+          if (measure && (truncates || fixed) && (n.characters || "").length && toMeasure.length < 200) {
+            toMeasure.push(n);
+          } else if (truncates && (n.characters || "").length * size * 0.5 > box.width * lines) {
             report(n, "text_truncated", { text: n.characters.slice(0, 60) });
           }
         }
@@ -840,8 +894,11 @@ const handlers = {
           }
         }
       }
-      if (minTouch && isControl(n) && (box.width < minTouch - EPS || box.height < minTouch - EPS)) {
-        report(n, "small_touch_target", { width: Math.round(box.width), height: Math.round(box.height), required: minTouch });
+      // The outermost control is the tap target; what is inside it is not.
+      const why = minTouch && !inControl ? controlReason(n) : null;
+      if (why && (box.width < minTouch - EPS || box.height < minTouch - EPS) &&
+          !(why === "action icon" && paddedHitArea(n, minTouch))) {
+        report(n, "small_touch_target", { width: Math.round(box.width), height: Math.round(box.height), required: minTouch, because: why });
       }
       if (!("children" in n) || n.type === "BOOLEAN_OPERATION") return;
       let inner = clip;
@@ -849,12 +906,35 @@ const handlers = {
         inner = clip ? intersect(box, clip) : { x: box.x, y: box.y, width: box.width, height: box.height };
         inner.id = n.id;
       }
-      for (const c of n.children) walk(c, inner, cut, inInstance || n.type === "INSTANCE");
+      const within = inControl || !!controlReason(n);
+      for (const c of n.children) walk(c, inner, cut, inInstance || n.type === "INSTANCE", within);
     };
-    walk(root, null, false, root.type === "INSTANCE");
+    walk(root, null, false, root.type === "INSTANCE", false);
+    // Exact truncation: let a copy of the text grow to the height its content
+    // needs at the same width, compare, and remove the copy in the same step.
+    let unmeasured = 0;
+    for (const n of toMeasure) {
+      let copy = null;
+      try {
+        await Promise.all(n.getRangeAllFontNames(0, n.characters.length).map(figma.loadFontAsync));
+        copy = n.clone();
+        copy.textTruncation = "DISABLED";
+        copy.textAutoResize = "HEIGHT";
+        const need = copy.height, have = n.absoluteBoundingBox.height;
+        if (need > have + EPS) {
+          report(n, "text_truncated", { text: n.characters.slice(0, 60), needsHeight: Math.round(need), hasHeight: Math.round(have), measured: true });
+        }
+      } catch (e) {
+        unmeasured++;
+      } finally {
+        if (copy) copy.remove();
+      }
+    }
     const total = Object.keys(summary).reduce((a, k) => a + summary[k], 0);
     const out = { scope: root.name, checks: want.concat(minTouch ? ["touch"] : []), nodesChecked: checked, total, summary, issues };
     if (total > issues.length) out.truncated = true;
+    if (params.measure_text && !measure) out.textNotMeasured = "Read-only is on, so text was estimated, not measured (measure_text briefly adds and removes a copy of each text layer)";
+    else if (unmeasured) out.textNotMeasured = unmeasured + " text layers could not be measured (missing font or locked parent)";
     if (layout && insideInstances) out.layoutNotChecked = insideInstances + " layers inside instances; audit their main component to check those";
     if (disabledSkipped) out.contrastSkippedDisabled = disabledSkipped + " text layers in disabled controls (WCAG exempts them)";
     if (contrastUnknown) out.contrastNotMeasured = contrastUnknown + " text layers sit on an image, gradient or translucent fill; check those by screenshot";
@@ -1044,31 +1124,9 @@ const handlers = {
   },
 
   async set_auto_layout(params) {
-    const n = await node(params.node_id);
-    if (!("layoutMode" in n)) throw new Error("node " + params.node_id + " does not support auto-layout");
-    n.layoutMode = params.layout_mode;
-    if (params.layout_mode === "NONE") return done(params, n);
-    if (params.item_spacing !== undefined) n.itemSpacing = params.item_spacing;
-    if (params.padding !== undefined) {
-      n.paddingTop = n.paddingRight = n.paddingBottom = n.paddingLeft = params.padding;
-    }
-    if (params.padding_top !== undefined) n.paddingTop = params.padding_top;
-    if (params.padding_right !== undefined) n.paddingRight = params.padding_right;
-    if (params.padding_bottom !== undefined) n.paddingBottom = params.padding_bottom;
-    if (params.padding_left !== undefined) n.paddingLeft = params.padding_left;
-    if (params.primary_axis_align) n.primaryAxisAlignItems = params.primary_axis_align;
-    if (params.counter_axis_align) n.counterAxisAlignItems = params.counter_axis_align;
-    if (params.layout_wrap) {
-      if (params.layout_wrap === "WRAP" && n.layoutMode !== "HORIZONTAL") throw new Error("layout_wrap WRAP needs layout_mode HORIZONTAL");
-      n.layoutWrap = params.layout_wrap;
-    }
-    if (params.counter_axis_spacing !== undefined && params.counter_axis_spacing !== null) {
-      if (n.layoutWrap !== "WRAP") throw new Error("counter_axis_spacing is the gap between wrapped rows: set layout_wrap WRAP first");
-      n.counterAxisSpacing = params.counter_axis_spacing;
-    }
-    if (params.primary_axis_sizing) n.primaryAxisSizingMode = params.primary_axis_sizing;
-    if (params.counter_axis_sizing) n.counterAxisSizingMode = params.counter_axis_sizing;
-    return done(params, n);
+    const nodes = await targets(params);
+    for (const n of nodes) applyAutoLayout(n, params);
+    return done(params, nodes);
   },
 
   // How a layer sizes and sits inside its parent. FILL and HUG only mean
@@ -1857,6 +1915,7 @@ async function postSelection() {
   const items = [];
   for (const n of sel) {
     const item = { id: n.id, name: n.name, type: n.type, link: nodeLink(n.id) };
+    if ("width" in n) { item.width = Math.round(n.width); item.height = Math.round(n.height); }
     // Frames are copied as links; every other element (vectors, instances, …)
     // is copied as SVG, so pre-export it now to keep the UI copy synchronous
     // (clipboard writes must happen inside the click gesture). Skip huge
@@ -1874,6 +1933,11 @@ async function postSelection() {
   figma.ui.postMessage({ selection: items });
 }
 figma.on("selectionchange", postSelection);
+// The window names the open page, which tools act on and the user can change.
+figma.clientStorage.getAsync("theme").then((t) => t && figma.ui.postMessage({ theme: t }), () => {});
+const postPage = () => figma.ui.postMessage({ page: figma.currentPage.name });
+figma.on("currentpagechange", postPage);
+postPage();
 postSelection();
 
 // ---------- activity log clicks ----------
@@ -1904,12 +1968,17 @@ figma.ui.onmessage = async (msg) => {
   if (!msg) return;
   // The window measures its content after every render.
   if (msg.resize) {
-    figma.ui.resize(280, Math.max(104, Math.min(600, Math.round(msg.resize))));
+    figma.ui.resize(320, Math.max(60, Math.min(640, Math.round(msg.resize))));
     return;
   }
   if (msg.uiAction) {
     // A log row whose layer was deleted since: nothing to select.
     await uiAction(msg).catch(() => {});
+    return;
+  }
+  if (msg.setTheme !== undefined) {
+    // The window's light/dark choice outlives the session; "auto" follows Figma.
+    await figma.clientStorage.setAsync("theme", msg.setTheme).catch(() => {});
     return;
   }
   if (msg.setReadOnly !== undefined) {
@@ -1924,15 +1993,25 @@ figma.ui.onmessage = async (msg) => {
   try {
     if (!h) throw new Error("unknown command: " + msg.command);
     if (readOnly && act.write) {
-      figma.notify("AI tried to edit this file (" + msg.command + ") and was blocked. Untick Read-only in Figma MCP Console to allow edits.", { timeout: 8000 });
+      act.blocked = true;
+      figma.notify("AI tried to edit this file (" + msg.command + ") and was blocked. Turn off Read-only in Figma MCP Console to allow edits.", { timeout: 8000 });
       throw new Error(msg.command + " was blocked: read-only mode is on in this file's Figma MCP Console window. " +
         "Tell the user; they can turn it off there if the edit is intended.");
     }
+    // Lets the window say "Editing" while a write runs, not only afterwards.
+    if (act.write) figma.ui.postMessage({ working: msg.command });
     const result = await h(p);
     figma.ui.postMessage({ id: msg.id, result: result === undefined ? null : result });
   } catch (e) {
     act.error = explainError(String((e && e.message) || e));
     figma.ui.postMessage({ id: msg.id, error: act.error });
+  }
+  // The log names the layer, not just its id; a deleted one keeps the id only.
+  if (act.node) {
+    try {
+      const n = await figma.getNodeByIdAsync(act.node);
+      if (n) act.name = n.name;
+    } catch (e) {}
   }
   figma.ui.postMessage({ activity: act });
 };
